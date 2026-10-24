@@ -1,0 +1,23 @@
+{
+  "name": "comp-plan-simulator",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Unofficial simulator that explains how a compensation plan calculates income, based on the user's own assumptions.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "node --test src/engine/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
