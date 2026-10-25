@@ -2,7 +2,7 @@ import { PLAN_PRICES } from '../../config/plan.ts';
 import { inMonth, toIso } from '../../engine/activity.ts';
 import { eventsForMonth } from '../../engine/calendar.ts';
 import type { CalEvent, CalendarInput } from '../../engine/calendar.ts';
-import { monthActivity } from '../../engine/team.ts';
+import { allActivations, monthActivity } from '../../engine/team.ts';
 import { locale, money, t } from '../../i18n/index.ts';
 import { getState } from '../../state/store.ts';
 import { esc, icon } from '../dom.ts';
@@ -23,7 +23,7 @@ function input(): CalendarInput {
     memberPlan: s.profile.memberPlan,
     memberSince: parse(s.profile.memberSince),
     partnerSince: parse(s.profile.partnerSince),
-    activations: s.month.activationLog.filter((e) => inMonth(e, today)),
+    activations: allActivations(s.month, today).filter((e) => inMonth(e, today)),
     weeks: monthActivity(s.month, PLAN_PRICES, today).activity.weeks,
     income: currentMonth().income,
   };
@@ -48,6 +48,7 @@ function detail(e: CalEvent): string {
   if (e.key === 'membership') return p.first ? t('cal.detail.membershipFirst', { plan: t(`plans.${p.plan}`) }) : t('cal.detail.membership', { plan: t(`plans.${p.plan}`) });
   if (e.key === 'renewal') return t('cal.detail.renewal');
   if (e.key === 'close') return t('cal.detail.close', { month: monthName(Number(p.month)) });
+  if (!e.amount) return t(p.known ? 'cal.detail.payNone' : 'cal.detail.payDay', { month: monthName(Number(p.month)) });
   return t('cal.detail.monthly', { month: monthName(Number(p.month)) });
 }
 
@@ -63,6 +64,11 @@ export function calendarPanel(): string {
   const todayIso = toIso(new Date());
   const fmtMonth = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric' }).format(first);
   const weekdays = Array.from({ length: 7 }, (_, i) => new Intl.DateTimeFormat(locale(), { weekday: 'short' }).format(new Date(2024, 0, 1 + i)));
+  // Payments need the since-dates from Profile; say so instead of silently showing none.
+  const missingDates = [
+    c.isMember && !c.memberSince ? t('cal.needMember') : '',
+    c.isPartner && !c.partnerSince ? t('cal.needPartner') : '',
+  ].filter(Boolean);
   const incoming = events.filter((e) => e.kind === 'payout').reduce((s, e) => s + e.amount, 0);
   const outgoing = events.filter((e) => e.kind === 'payment').reduce((s, e) => s + e.amount, 0);
 
@@ -74,7 +80,7 @@ export function calendarPanel(): string {
     const label = new Intl.DateTimeFormat(locale(), { dateStyle: 'full' }).format(new Date(view.year, view.month, d));
     cells.push(`<button type="button" class="cal-cell${iso === todayIso ? ' is-today' : ''}${iso === view.selected ? ' is-selected' : ''}" data-day="${iso}" aria-pressed="${iso === view.selected}" aria-label="${esc(label)}${ev.length ? `: ${ev.length}` : ''}">
       <span class="cal-num">${d}</span>
-      <span class="cal-chips">${ev.slice(0, 3).map((e) => `<span class="cal-chip ${e.kind}" style="--c:${color(e)}"><span class="truncate">${esc(short(e))}</span>${e.amount ? `<span class="num">${esc(signed(e))}</span>` : ''}</span>`).join('')}
+      <span class="cal-chips">${ev.slice(0, 3).map((e) => `<span class="cal-chip ${e.kind}${e.kind === 'payout' && !e.amount ? ' is-zero' : ''}" style="--c:${color(e)}"><span class="truncate">${esc(short(e))}</span>${e.amount ? `<span class="num">${esc(signed(e))}</span>` : ''}</span>`).join('')}
         ${ev.length > 3 ? `<span class="cal-more">+${ev.length - 3}</span>` : ''}</span>
       <span class="cal-dots" aria-hidden="true">${ev.slice(0, 4).map((e) => `<i style="background:${color(e)}"></i>`).join('')}</span>
     </button>`);
@@ -93,6 +99,8 @@ export function calendarPanel(): string {
         <button type="button" class="btn btn-sm icon-btn" data-cal="next" aria-label="${esc(t('cal.next'))}">${icon('chevron', 16)}</button>
       </div>
     </div>
+    ${missingDates.length ? `<div class="note note-info mb-3">${icon('info', 16)}<span>${esc(t('cal.missingDates', { what: missingDates.join(' · ') }))}
+      <a class="underline font-semibold" href="#/profile">${esc(t('nav.profile'))}</a></span></div>` : ''}
     <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 mb-3">
       <p class="font-display text-2xl font-bold uppercase" aria-live="polite">${esc(fmtMonth)}</p>
       <p class="text-sm text-ink-2"><span class="text-good font-semibold num">+${money(incoming)}</span> ${esc(t('cal.in'))} · <span class="text-bad font-semibold num">−${money(outgoing)}</span> ${esc(t('cal.out'))}</p>

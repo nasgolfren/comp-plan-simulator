@@ -68,10 +68,16 @@ export function eventsForMonth(year: number, month: number, c: CalendarInput): C
     const each = c.income.matching / qualified.length;
     qualified.forEach((w) => push({ date: addDays(w.start, 7), kind: 'payout', key: 'matching', amount: each, params: { week: w.start.getTime() } }));
   }
+  // Monthly payout days, shown in every month so the schedule is always visible. Amounts are known
+  // only for the payouts of this production month (paid next month); elsewhere they're 0.
+  // Fast Start is a one-time bonus, so it only appears when it's earned.
+  const known = year === prodY + Math.floor((prodM + 1) / 12) && month === (prodM + 1) % 12;
   (Object.keys(PAYOUT_SCHEDULE) as PayoutKey[]).forEach((k) => {
     const rule = PAYOUT_SCHEDULE[k];
-    if (rule.kind !== 'monthly' || !(c.income[k] > 0)) return;
-    push({ date: businessDay(new Date(prodY, prodM + 1, rule.day)), kind: 'payout', key: k, amount: c.income[k], params: { month: prodMonth.getTime() } });
+    if (rule.kind !== 'monthly') return;
+    const amount = known ? c.income[k] : 0;
+    if (k === 'fastStart' && !(amount > 0)) return;
+    push({ date: businessDay(new Date(year, month, rule.day)), kind: 'payout', key: k, amount, params: { month: new Date(year, month - 1, 1).getTime(), known: known ? 1 : 0 } });
   });
   push({ date: new Date(prodY, prodM + 1, 0), kind: 'deadline', key: 'close', amount: 0, params: { month: prodMonth.getTime() } });
 

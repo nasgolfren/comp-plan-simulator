@@ -5,19 +5,25 @@ import { INCOME_KEYS } from '../../engine/types.ts';
 import { DURATIONS, durationLabel, money, monthLabel, num, t } from '../../i18n/index.ts';
 import { getState } from '../../state/store.ts';
 import { esc, icon } from '../dom.ts';
-import { numField, pct, planTrio, selectField, toggle } from '../fields.ts';
+import { numField, planTrio, selectField, toggle } from '../fields.ts';
 import { legend, mountChart } from '../components/charts.ts';
 import { footnote } from '../components/disclaimer.ts';
 import { currentSim, incomeSeries, rankName, seriesColor } from '../components/results.ts';
+import { helpButton, helpPanel } from '../components/tableHelp.ts';
 import type { View } from './view.ts';
 
-/** What "start from my Structure" brings in, so the switch says what it does. */
-function structureHint(): string {
-  const s = getState();
-  if (!s.sim.fromStructure) return t('sim.fromStructureOff');
-  const from = structureStart(s.month, PLAN_PRICES);
-  const members = Object.values(from.members).reduce((a, b) => a + b, 0) + from.legs.reduce((a, l) => a + Object.values(l.members).reduce((x, y) => x + y, 0), 0);
-  return t('sim.fromStructureHint', { members: num(members), teams: from.legs.length });
+/** What "start from my Structure" brings in, so the switch says what it does (also used by Goals). */
+export function structureHint(on: boolean): string {
+  if (!on) return t('sim.fromStructureOff');
+  const from = structureStart(getState().month, PLAN_PRICES);
+  const sum = (c: Record<string, number>) => Object.values(c).reduce((a, b) => a + b, 0);
+  return t('sim.fromStructureHint', {
+    members: num(sum(from.members)),
+    acts: num(sum(from.activations ?? {})),
+    teams: num(from.legs.length),
+    partners: num(from.legs.reduce((a, l) => a + l.partners, 0)),
+    teamMembers: num(from.legs.reduce((a, l) => a + sum(l.members), 0)),
+  });
 }
 
 /** Whole people at a pace, for people leaving: "[1] Members every [3 mo ▾]". */
@@ -57,16 +63,9 @@ function formHtml(): string {
       ${numField(t('sim.teamPartners'), 'sim.teamNewPartners.count', { min: 0, step: 1 })}
       <div class="panel-quiet grid gap-1.5">
         ${toggle(t('sim.fromStructure'), 'sim.fromStructure')}
-        <p class="hint" id="sim-from-hint">${esc(structureHint())}</p>
+        <p class="hint" id="sim-from-hint">${esc(structureHint(getState().sim.fromStructure))}</p>
       </div>
       ${lossesSection()}
-      <details class="fold">
-        <summary><span class="font-semibold text-ink-2">${esc(t('sim.advanced'))}</span>${icon('chevron', 16, 'chev')}</summary>
-        <div class="grid grid-cols-2 gap-3 items-end mt-3">
-          ${numField(t('sim.newShare'), 'sim.newMemberShare', pct)}
-          ${numField(t('sim.maxLegs'), 'sim.maxLegs', { min: 0, max: 50 })}
-        </div>
-      </details>
     </div>`;
 }
 
@@ -103,7 +102,15 @@ function results(): string {
     </section>
 
     <section class="panel mb-4" aria-labelledby="sim-table-h">
-      <h2 id="sim-table-h" class="mb-3">${esc(t('sim.table'))}</h2>
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 id="sim-table-h">${esc(t('sim.table'))}</h2>
+        ${helpButton('sim-help')}
+      </div>
+      ${helpPanel('sim-help', [
+        ...keys.map((k) => ({ term: `${t(`cal.short.${k}`)} · ${t(`income.${k}`)}`, text: t(`sim.help.${k}`) })),
+        { term: t('col.costs'), text: t('sim.help.costs') },
+        { term: t('col.net'), text: t('sim.help.net') },
+      ])}
       <div class="overflow-x-auto -mx-1 px-1">
         <table class="biz-table sim-table">
           <thead><tr>
@@ -113,7 +120,7 @@ function results(): string {
           </tr></thead>
           <tbody>${sim.map((m) => `<tr>
             <th scope="row" class="whitespace-nowrap">${esc(monthLabel(m.date))}</th>
-            <td>${esc(rankName(m.result.qpRank === 'none' ? 'none' : m.result.paidRank, true))}</td>
+            <td>${m.result.qpRank === 'none' ? '<span class="text-muted">—</span>' : esc(rankName(m.result.paidRank, true))}</td>
             ${keys.map((k) => `<td class="num ${m.result.income[k] ? '' : 'text-muted'}">${money(m.result.income[k])}</td>`).join('')}
             <td class="num text-ink-2">−${money(m.result.costs.total)}</td>
             <td class="num font-semibold ${m.result.net < 0 ? 'text-bad' : ''}">${money(m.result.net)}</td>
@@ -165,7 +172,7 @@ export const simulationView: View = {
       root.querySelector<HTMLElement>('[data-path="sim.losses.on"]')?.focus();
     }
     const hint = root.querySelector('#sim-from-hint');
-    if (hint) hint.textContent = structureHint();
+    if (hint) hint.textContent = structureHint(getState().sim.fromStructure);
     root.querySelector('#sim-results')!.innerHTML = results();
     draw(root);
   },

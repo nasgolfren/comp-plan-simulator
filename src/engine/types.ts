@@ -54,6 +54,11 @@ export interface PartnerNode {
   restActivationVolume: number;
   /** Optional: monthly payments of people below this Partner who aren't listed one by one. */
   restRecurringVolume: number;
+  /**
+   * The Partner is also a Member (a Partner-Member). Their membership is their sponsor's
+   * production: a new activation if it started this month, otherwise a paying member.
+   */
+  membership?: { plan: MemberPlan; since: string } | null;
   children: PartnerNode[];
 }
 

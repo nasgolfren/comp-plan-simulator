@@ -88,6 +88,14 @@ test('goal planner: an existing business can already meet the goal with no extra
   assert.equal(g.plan!.newPartners.count, 0);
 });
 
+test('starting from Structure: this month\'s real activations replace the typical month in month 0', () => {
+  const a = { ...DEFAULT_ASSUMPTIONS, personalActivations: { starter: 0, classic: 1, premium: 0 } };
+  const from = { members: { starter: 0, classic: 0, premium: 0 }, legs: [], activations: { starter: 0, classic: 0, premium: 2 } };
+  const m = simulate(a, profile, prices, { ...opts, from });
+  assert.equal(m[0].result.production.personalActivation, 1_000);
+  assert.equal(m[1].result.production.personalActivation, 200);
+});
+
 test('simulation can start from existing teams', () => {
   const from = { members: { starter: 0, classic: 0, premium: 0 }, legs: [{ partners: 3, members: { starter: 0, classic: 10, premium: 0 } }] };
   const m = simulate(DEFAULT_ASSUMPTIONS, profile, prices, { ...opts, from });

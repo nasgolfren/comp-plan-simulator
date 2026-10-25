@@ -5,6 +5,7 @@ import { readInput } from './ui/fields.ts';
 import { markActive, shell, topBadges, welcomeShell } from './ui/layout.ts';
 import type { Route } from './ui/layout.ts';
 import { openDisclaimer } from './ui/components/disclaimer.ts';
+import { handleHelpClick } from './ui/components/tableHelp.ts';
 import { calculatorView } from './ui/views/calculator.ts';
 import { dashboardView } from './ui/views/dashboard.ts';
 import { goalsView } from './ui/views/goals.ts';
@@ -81,10 +82,29 @@ function onBound(e: Event): void {
 document.addEventListener('input', onBound);
 document.addEventListener('change', onBound);
 
+// ---------- date fields: pick from the calendar only ----------
+// Typing into native date fields is unreliable across locales, so clicks and Enter/Space open the
+// picker, Backspace/Delete clear the date, and any other key is ignored (Tab still moves on).
+const isDate = (el: EventTarget | null): el is HTMLInputElement => el instanceof HTMLInputElement && el.type === 'date';
+const openPicker = (el: HTMLInputElement) => { try { el.showPicker(); } catch { /* not supported or not allowed: the field still works */ } };
+document.addEventListener('click', (e) => { if (isDate(e.target)) openPicker(e.target); });
+document.addEventListener('keydown', (e) => {
+  if (!isDate(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const el = e.target;
+  if (e.key === 'Tab' || e.key === 'Escape') return;
+  e.preventDefault();
+  if (e.key === 'Enter' || e.key === ' ') openPicker(el);
+  else if (e.key === 'Backspace' || e.key === 'Delete') {
+    el.value = '';
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+});
+
 // ---------- global actions ----------
 document.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
   if (target.closest('[data-action="disclaimer"]')) { void openDisclaimer(); return; }
+  if (handleHelpClick(target)) return;
   const lang = target.closest<HTMLElement>('[data-set-lang]');
   if (lang) update((s) => { s.lang = lang.dataset.setLang as 'en' | 'es'; }, 'lang');
 });

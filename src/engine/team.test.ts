@@ -58,6 +58,25 @@ test('toMonthInput feeds the tree into the monthly calculation', () => {
   assert.equal(r.qpRank, 'md'); // three legs of $1,000, each under the $1,200 cap
 });
 
+test('a Partner-Member\'s membership is their sponsor\'s production', () => {
+  const today = new Date(2026, 9, 25);
+  const month: BusinessMonth = {
+    activationLog: [], personalPayingMembers: zero,
+    history: { months1to2: zero, months3to5: zero, months6to11: zero, qbiNew: 0, qbiPaying: 0 },
+    team: [
+      node('new', { membership: { plan: 'premium', since: '2026-10-12' } }), // joined this month → your activation
+      node('old', { membership: { plan: 'classic', since: '2026-03-01' }, children: [node('kid', { membership: { plan: 'premium', since: '2026-10-02' } })] }),
+    ],
+  };
+  const input = toMonthInput(month, prices, today);
+  assert.deepEqual(input.personalActivations, { starter: 0, classic: 0, premium: 1 });
+  assert.deepEqual(input.personalPayingMembers, { starter: 0, classic: 1, premium: 0 });
+  // kid's Premium is 'old''s activation this month, not yours
+  const s = summarizeTeam(month.team, prices, today);
+  assert.deepEqual(s.get('old')!.activations, { starter: 0, classic: 0, premium: 1 });
+  assert.equal(input.legs.find((l) => l.id === 'old')!.headActivations.premium, 1);
+});
+
 test('tree helpers find, flatten and remove Partners', () => {
   const team = [node('a', { children: [node('b', { children: [node('c')] })] }), node('d')];
   assert.equal(findNode(team, 'c')?.id, 'c');

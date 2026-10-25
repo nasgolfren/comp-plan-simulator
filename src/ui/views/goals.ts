@@ -1,5 +1,5 @@
 import { MEMBER_PLANS, PLAN_PRICES, RANKS, rankById } from '../../config/plan.ts';
-import { legActivationVolume, rankGap } from '../../engine/calc.ts';
+import { activationVolume, legActivationVolume, rankGap } from '../../engine/calc.ts';
 import { planGoal } from '../../engine/simulate.ts';
 import type { Cadence, Goal, GoalStyle } from '../../engine/simulate.ts';
 import { teamToLegs } from '../../engine/team.ts';
@@ -10,9 +10,13 @@ import { esc, icon } from '../dom.ts';
 import { numField, selectField, toggle } from '../fields.ts';
 import { footnote } from '../components/disclaimer.ts';
 import { currentMonth, rankName } from '../components/results.ts';
+import { helpButton, helpPanel } from '../components/tableHelp.ts';
+import { structureHint } from './simulation.ts';
 import type { View } from './view.ts';
 
 const STYLES: GoalStyle[] = ['personal', 'balanced', 'team'];
+/** Month-by-month columns, each explained in the header and in a legend under the table. */
+const COLS = ['qp', 'tav', 'direct', 'partners', 'yours', 'team'] as const;
 
 function form(): string {
   const g = getState().goal;
@@ -36,7 +40,10 @@ function form(): string {
           <span><span class="block font-semibold text-ink">${esc(t(`goals.style.${st}`))}</span><span class="block hint">${esc(t(`goals.style.${st}Hint`))}</span></span>
         </button>`).join('')}
       </div>
-      <div class="panel-quiet">${toggle(t('sim.fromStructure'), 'goal.fromStructure')}</div>
+      <div class="panel-quiet grid gap-1.5">
+        ${toggle(t('sim.fromStructure'), 'goal.fromStructure')}
+        <p class="hint" id="goal-from-hint">${esc(structureHint(g.fromStructure))}</p>
+      </div>
     </div>`;
 }
 
@@ -70,6 +77,9 @@ const countsText = (c: PlanCounts) => {
   const parts = MEMBER_PLANS.filter((p) => c[p] > 0).map((p) => `${num(c[p])} ${t(`plans.${p}`)}`);
   return parts.length ? parts.join(' + ') : t('goals.none');
 };
+/** The plan's activations as one number: their activation volume per month. */
+const volumeLine = (c: PlanCounts) => `<p class="plan-volume"><span class="num">${money(activationVolume(c, PLAN_PRICES))}</span> ${esc(t('goals.volume'))}</p>`;
+
 // Whole Partners: n per month, or n every few months.
 const partnersText = (c: Cadence) => (c.count <= 0 ? t('goals.none')
   : c.every <= 1 ? t('goals.perMonth', { n: num(c.count) }) : t('goals.everyN', { count: num(c.count), n: num(c.every) }));
@@ -100,9 +110,9 @@ function plan(): string {
       ${nothingNeeded
         ? `<div class="note note-good">${icon('check', 16)}<span>${esc(t('goals.already'))}</span></div>`
         : `<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div class="plan-step"><p class="eyebrow">${esc(t('goals.planYou'))}</p><p class="font-display text-xl font-bold">${esc(countsText(p.personalActivations))}</p><p class="hint">${esc(t('goals.monthly'))}</p></div>
+            <div class="plan-step"><p class="eyebrow">${esc(t('goals.planYou'))}</p><p class="font-display text-xl font-bold">${esc(countsText(p.personalActivations))}</p>${volumeLine(p.personalActivations)}</div>
             <div class="plan-step"><p class="eyebrow">${esc(t('goals.planPartners'))}</p><p class="font-display text-xl font-bold">${esc(partnersText(p.newPartners))}</p></div>
-            <div class="plan-step"><p class="eyebrow">${esc(t('goals.planPartnerAct'))}</p><p class="font-display text-xl font-bold">${esc(countsText(p.partnerActivations))}</p><p class="hint">${esc(t('goals.monthly'))}</p></div>
+            <div class="plan-step"><p class="eyebrow">${esc(t('goals.planPartnerAct'))}</p><p class="font-display text-xl font-bold">${esc(countsText(p.partnerActivations))}</p>${volumeLine(p.partnerActivations)}</div>
             <div class="plan-step"><p class="eyebrow">${esc(t('goals.planTeam'))}</p><p class="font-display text-xl font-bold">${esc(partnersText(p.teamNewPartners))}</p></div>
           </div>`}
       ${hitMonth !== null ? `<div class="note note-good mt-4">${icon('target', 16)}<span>${esc(t('goals.reachedIn', { m: hitMonth + 1, date: dateOf(hitMonth) }))}</span></div>` : ''}
@@ -121,14 +131,26 @@ function plan(): string {
     </section>` : ''}
 
     <section class="panel" aria-labelledby="gt-h">
-      <h2 id="gt-h" class="mb-3">${esc(t('goals.table'))}</h2>
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 id="gt-h">${esc(t('goals.table'))}</h2>
+        ${helpButton('goal-help')}
+      </div>
+      ${helpPanel('goal-help', COLS.map((c) => ({ term: t(`goals.col.${c}`), text: t(`goals.col.${c}Hint`) })))}
       <div class="overflow-x-auto -mx-1 px-1"><table class="biz-table">
-        <thead><tr><th>${esc(t('col.month'))}</th><th>${esc(t('col.rank'))}</th><th class="num">QP</th><th class="num">TAV</th><th class="num">${esc(t('col.partners'))}</th><th class="num">${esc(t('col.members'))}</th><th class="num">${esc(t('col.net'))}</th></tr></thead>
+        <thead><tr>
+          <th>${esc(t('col.month'))}</th><th>${esc(t('col.rank'))}</th>
+          ${COLS.map((c) => (c === 'qp' || c === 'tav'
+            // Short abbreviations; their meaning is in "Table help", so the columns stay narrow.
+            ? `<th class="num" title="${esc(t(`goals.col.${c}Sub`))}">${esc(t(`goals.col.${c}`))}</th>`
+            : `<th class="num" title="${esc(t(`goals.col.${c}Hint`))}">${esc(t(`goals.col.${c}`))}<span class="th-sub">${esc(t(`goals.col.${c}Sub`))}</span></th>`)).join('')}
+          <th class="num">${esc(t('col.net'))}</th>
+        </tr></thead>
         <tbody>${res.months.map((m, i) => `<tr class="${i === hitMonth ? 'is-hit' : ''}">
           <th scope="row" class="whitespace-nowrap">${esc(monthLabel(m.date))}</th>
-          <td>${esc(rankName(m.result.qpRank === 'none' ? 'none' : m.result.paidRank, true))}</td>
+          <td>${m.result.qpRank === 'none' ? '<span class="text-muted">—</span>' : esc(rankName(m.result.paidRank, true))}</td>
           <td class="num">${money(m.result.production.qp)}</td><td class="num">${money(m.result.production.tav)}</td>
-          <td class="num">${num(m.teamPartners)}</td><td class="num">${num(m.payingMembers)}</td>
+          <td class="num">${num(m.legs)}</td><td class="num">${num(m.teamPartners)}</td>
+          <td class="num">${num(m.personalMembers)}</td><td class="num">${num(m.teamMembers)}</td>
           <td class="num font-semibold ${m.result.net < 0 ? 'text-bad' : ''}">${money(m.result.net)}</td>
         </tr>`).join('')}</tbody>
       </table></div>
@@ -174,6 +196,8 @@ export const goalsView: View = {
     });
   },
   update(root) {
+    const hint = root.querySelector('#goal-from-hint');
+    if (hint) hint.textContent = structureHint(getState().goal.fromStructure);
     root.querySelector('#goal-results')!.innerHTML = results();
   },
 };

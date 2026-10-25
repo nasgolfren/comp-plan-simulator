@@ -31,13 +31,20 @@ test('this month: DAB the day after, matching the Monday after a qualifying week
   assert.deepEqual(ev.filter((e) => e.key === 'renewal').map((e) => iso(e.date)), ['10/12']);
 });
 
-test('next month: monthly payouts on their schedule days, zero amounts skipped', () => {
+test('next month: monthly payouts on their schedule days with this month\'s amounts', () => {
   const ev = eventsForMonth(2026, 10, base);
-  const at = (k: string) => ev.filter((e) => e.key === k).map((e) => iso(e.date));
-  assert.deepEqual(at('dab'), ['11/1']);
-  assert.deepEqual(at('mab'), ['11/9']); // 8 Nov is a Sunday
-  assert.deepEqual(at('tlb'), ['11/10']);
-  assert.deepEqual(at('recurring'), ['11/16']); // 15 Nov is a Sunday
-  assert.deepEqual(at('bbb'), []);
-  assert.deepEqual(at('membership'), ['11/30']); // clamped to the 30th
+  const at = (k: string) => ev.filter((e) => e.key === k).map((e) => [iso(e.date), e.amount]);
+  assert.deepEqual(at('dab'), [['11/1', 50]]);
+  assert.deepEqual(at('mab'), [['11/9', 60]]); // 8 Nov is a Sunday
+  assert.deepEqual(at('tlb'), [['11/10', 300]]);
+  assert.deepEqual(at('recurring'), [['11/16', 205]]); // 15 Nov is a Sunday
+  assert.deepEqual(at('bbb'), [['11/16', 0]]); // the day is shown even with nothing to pay
+  assert.deepEqual(at('fastStart'), []); // one-time: only when earned
+  assert.deepEqual(ev.filter((e) => e.key === 'membership').map((e) => iso(e.date)), ['11/30']); // clamped to the 30th
+});
+
+test('payout days appear in every month, without amounts outside the known month', () => {
+  const ev = eventsForMonth(2027, 0, base); // January 2027
+  assert.deepEqual(ev.filter((e) => e.key === 'mab').map((e) => [iso(e.date), e.amount]), [['1/8', 0]]);
+  assert.deepEqual(ev.filter((e) => e.key === 'tlb').map((e) => [iso(e.date), e.amount]), [['1/11', 0]]); // 10 Jan is a Sunday
 });

@@ -56,8 +56,15 @@ export interface SimMonth {
   index: number;
   date: Date;
   result: MonthResult;
+  /** All paying members at the end of the month: yours plus your teams'. */
   payingMembers: number;
+  /** Your own members (from your direct activations). */
+  personalMembers: number;
+  /** Members of the Partners in your teams. */
+  teamMembers: number;
+  /** All Partners in your teams. */
   teamPartners: number;
+  /** Direct Partners, i.e. teams. */
   legs: number;
 }
 
@@ -65,6 +72,8 @@ export interface SimMonth {
 export interface SimStart {
   members: PlanCounts;
   legs: { partners: number; members: PlanCounts }[];
+  /** Your actual activations this month: they replace the typical month in month 0 (the current month). */
+  activations?: PlanCounts;
 }
 
 export interface SimOptions {
@@ -142,7 +151,8 @@ export function simulate(a: SimAssumptions, profile: CalcProfile, prices: Prices
       for (let i = 0; i < a.newPartners.count && legs.length < maxLegs; i++) legs.push({ joined: m, partners: 1, members: zero() });
     }
 
-    const personalNew = { ...a.personalActivations };
+    // Month 0 is the current month: with a starting business, its activations are the real ones.
+    const personalNew = m === 0 && opts.from?.activations ? { ...opts.from.activations } : { ...a.personalActivations };
     const calcLegs: Leg[] = legs.map((l, i) => {
       const legRecurring = recurring(l.members, prices); // members from earlier months pay this month
       const head = { ...a.partnerActivations };
@@ -175,11 +185,14 @@ export function simulate(a: SimAssumptions, profile: CalcProfile, prices: Prices
     }, { ...profile, renewalCurrent: true, fastStartMonth: m === opts.fastStartIndex }, prices);
 
     members = add(members, personalNew);
+    const teamMembers = legs.reduce((s, l) => s + total(l.members), 0);
     out.push({
       index: m,
       date: new Date(opts.start.getFullYear(), opts.start.getMonth() + m, 1),
       result,
-      payingMembers: total(members) + legs.reduce((s, l) => s + total(l.members), 0),
+      payingMembers: total(members) + teamMembers,
+      personalMembers: total(members),
+      teamMembers,
       teamPartners: legs.reduce((s, l) => s + l.partners, 0),
       legs: legs.length,
     });

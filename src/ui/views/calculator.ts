@@ -2,7 +2,7 @@ import { DAB, MEMBER_PLANS, PLAN_PRICES, rankById } from '../../config/plan.ts';
 import type { MemberPlan } from '../../config/plan.ts';
 import { inMonth, toIso } from '../../engine/activity.ts';
 import { activationVolume, recurringVolume } from '../../engine/calc.ts';
-import { findNode, flattenTeam, monthActivity, removeNode, summarizeTeam } from '../../engine/team.ts';
+import { allActivations, allPaying, findNode, flattenTeam, monthActivity, removeNode, summarizeTeam } from '../../engine/team.ts';
 import type { ActivationKind, PartnerNode, PlanCounts } from '../../engine/types.ts';
 import { locale, money, t } from '../../i18n/index.ts';
 import { getPath, getState, newActivation, newPartner, setPath, update } from '../../state/store.ts';
@@ -46,24 +46,24 @@ function planRow(base: string, label: string, total: string, totalKey: string): 
 const planHead = (last: string) =>
   `<thead><tr><th></th>${MEMBER_PLANS.map((p) => `<th><span class="plan-dot ${p}"></span> ${esc(t(`plans.${p}`))}</th>`).join('')}<th>${esc(last)}</th></tr></thead>`;
 
-/** Your dated activations this month. */
+/** Your dated activations this month, plus read-only rows for direct Partner-Members who joined this month. */
 function logSection(): string {
-  const log = getState().month.activationLog;
+  const month = getState().month;
+  const log = month.activationLog;
   const today = new Date();
   const min = toIso(new Date(today.getFullYear(), today.getMonth(), 1));
   const max = toIso(new Date(today.getFullYear(), today.getMonth() + 1, 0));
-  const counted = log.filter((e) => inMonth(e, today));
+  const fromPartners = allActivations(month, today).filter((e) => e.id.startsWith('pm-'));
+  const counted = [...log.filter((e) => inMonth(e, today)), ...fromPartners];
   const production = counted.reduce((s, e) => s + PLAN_PRICES.activation[e.plan], 0);
   const dab = counted.reduce((s, e) => s + DAB[e.plan], 0);
+  const dateFmt = new Intl.DateTimeFormat(locale(), { day: 'numeric', month: 'numeric', year: 'numeric' });
   const sel = (path: string, value: string, opts: { v: string; label: string }[], label: string) =>
     `<div class="input-wrap !min-h-9"><select class="!h-9" data-path="${path}" data-kind="select" aria-label="${esc(label)}">${opts.map((o) => `<option value="${o.v}" ${o.v === value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>`;
+  const addButton = (big: boolean) => `<button type="button" class="add-row${big ? ' is-big' : ''}" data-action="add-activation">${icon('plus', big ? 20 : 16)}${esc(t('calc.addActivation'))}</button>`;
 
+  if (log.length === 0 && fromPartners.length === 0) return addButton(true);
   return `
-    <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
-      <div><h3 class="!text-base">${esc(t('calc.activations'))}</h3><p class="hint mt-0.5">${esc(t('calc.activationsHint'))}</p></div>
-      <button type="button" class="btn btn-sm btn-primary" data-action="add-activation">${icon('plus', 15)}${esc(t('calc.addActivation'))}</button>
-    </div>
-    ${log.length === 0 ? `<p class="panel-quiet text-sm text-ink-2">${esc(t('calc.noActivations'))}</p>` : `
     <div class="overflow-x-auto -mx-1 px-1">
       <table class="biz-table log-table">
         <thead><tr><th>${esc(t('calc.colDate'))}</th><th>${esc(t('calc.colPlan'))}</th><th>${esc(t('calc.colType'))}</th><th class="num">${esc(t('calc.colProduction'))}</th><th class="num">DAB</th><th><span class="sr-only">${esc(t('team.actions'))}</span></th></tr></thead>
@@ -78,11 +78,23 @@ function logSection(): string {
             <td class="num">${ok ? money(DAB[e.plan]) : '—'}</td>
             <td><span class="row-actions"><button type="button" class="btn btn-ghost btn-sm icon-btn btn-danger" data-action="remove-activation" data-id="${e.id}" aria-label="${esc(t('calc.removeActivation'))}">${icon('trash', 16)}</button></span></td>
           </tr>`;
+        }).join('')}
+        ${fromPartners.map((e) => {
+          const partner = findNode(month.team, e.id.slice(3));
+          return `<tr class="is-linked">
+            <td class="text-ink-2 whitespace-nowrap">${esc(dateFmt.format(new Date(`${e.date}T00:00:00`)))}</td>
+            <td class="font-semibold">${esc(t(`plans.${e.plan}`))}</td>
+            <td><span class="pill pill-brand" title="${esc(t('calc.fromPartnerHint'))}">${icon('userPlus', 12)}${esc(t('calc.fromPartner', { name: partner?.name ?? '' }))}</span></td>
+            <td class="num">${money(PLAN_PRICES.activation[e.plan])}</td>
+            <td class="num">${money(DAB[e.plan])}</td>
+            <td></td>
+          </tr>`;
         }).join('')}</tbody>
         <tfoot><tr><th scope="row" colspan="3">${esc(t('calc.activationsTotal', { n: counted.length }))} <span class="counts ml-2 align-middle">${counts(deriveCounts(counted))}</span></th>
           <td class="num">${money(production)}</td><td class="num">${money(dab)}</td><td></td></tr></tfoot>
       </table>
-    </div>`}`;
+    </div>
+    ${addButton(false)}`;
 }
 
 const deriveCounts = (entries: { plan: MemberPlan }[]): PlanCounts => {
@@ -131,22 +143,42 @@ function historySection(): string {
     </div>`;
 }
 
-/** You this month: dated activations, paying members, and what's worked out from them. */
-function youSection(): string {
+/** Paying members you entered, plus your direct Partner-Members who joined before this month. */
+function payingNote(): string {
   const m = getState().month;
+  const linked = Object.values(allPaying(m)).reduce((a, b) => a + b, 0) - Object.values(m.personalPayingMembers).reduce((a, b) => a + b, 0);
+  return linked > 0 ? `<p class="hint mt-2">${icon('userPlus', 12)} ${esc(t('calc.payingFromPartners', { n: linked }))}</p>` : '';
+}
+
+const payingTotal = () => `${money(recurringVolume(allPaying(getState().month), PLAN_PRICES))} ${t('common.perMonth')}`;
+
+/** Your own Members: two separate cards (new this month / paying every month), then what's worked out. */
+function youSection(): string {
   return `
     <div class="mb-4"><h2>${esc(t('calc.you'))}</h2><p class="hint mt-0.5">${esc(t('calc.youHint'))}</p></div>
-    <div id="calc-log">${logSection()}</div>
-    <div class="mt-6">
-      <h3 class="!text-base mb-2">${esc(t('calc.rowPaying'))}</h3>
-      <div class="overflow-x-auto -mx-1 px-1">
-        <table class="biz-table you-table">
-          ${planHead(t('calc.colVolume'))}
-          <tbody>${planRow('month.personalPayingMembers', t('calc.rowPaying'), `${money(recurringVolume(m.personalPayingMembers, PLAN_PRICES))} ${t('common.perMonth')}`, 'paying')}</tbody>
-        </table>
-      </div>
+    <div class="grid gap-4">
+      <section class="sub-card" aria-labelledby="new-h">
+        <div class="sub-card-head">
+          <span class="sub-card-ic">${icon('plus', 16)}</span>
+          <div><h3 id="new-h">${esc(t('calc.activations'))}</h3><p class="hint mt-0.5">${esc(t('calc.activationsHint'))}</p></div>
+        </div>
+        <div id="calc-log">${logSection()}</div>
+      </section>
+      <section class="sub-card" aria-labelledby="paying-h">
+        <div class="sub-card-head">
+          <span class="sub-card-ic">${icon('layers', 16)}</span>
+          <div><h3 id="paying-h">${esc(t('calc.payingTitle'))}</h3><p class="hint mt-0.5">${esc(t('calc.payingHint'))}</p></div>
+        </div>
+        <div class="overflow-x-auto -mx-1 px-1">
+          <table class="biz-table you-table">
+            ${planHead(t('calc.colVolume'))}
+            <tbody>${planRow('month.personalPayingMembers', t('calc.rowPaying'), payingTotal(), 'paying')}</tbody>
+          </table>
+        </div>
+        <div id="calc-paying-note">${payingNote()}</div>
+      </section>
     </div>
-    <div id="calc-derived" class="mt-6 pt-4 border-t border-line">${derivedStrip()}</div>`;
+    <div id="calc-derived" class="mt-5 pt-4 border-t border-line">${derivedStrip()}</div>`;
 }
 
 /** Your organization as a tree table: one row per Partner, indented by level. */
@@ -165,11 +197,13 @@ function teamSection(): string {
     rows.push(`<tr class="${level ? 'is-child' : ''}">
       <th scope="row"><span class="tree-cell" style="--lvl:${level}">
         ${n.children.length ? `<button type="button" class="tree-toggle" data-toggle="${n.id}" aria-expanded="${open}" aria-label="${esc(n.name)}">${icon('chevron', 14)}</button>` : '<span class="tree-toggle-spacer"></span>'}
-        <span class="truncate">${esc(n.name)}</span>${sm.size ? `<span class="text-muted text-xs font-normal whitespace-nowrap">${esc(t('team.below', { n: sm.size }))}</span>` : ''}
+        <span class="truncate">${esc(n.name)}</span>
+        ${n.membership ? `<span class="pill pill-muted !px-2 !py-0.5 !text-[0.7rem]" title="${esc(t('team.isMember'))}"><span class="plan-dot ${n.membership.plan}"></span>${esc(t(`plans.${n.membership.plan}`))}</span>` : ''}
+        ${sm.size ? `<span class="text-muted text-xs font-normal whitespace-nowrap">${esc(t('team.below', { n: sm.size }))}</span>` : ''}
       </span></th>
       <td><span class="pill ${sm.rank === 'none' ? 'pill-muted' : 'pill-brand'}">${esc(sm.rank === 'none' ? '—' : rankById(sm.rank).short)}</span></td>
-      <td><span class="counts">${counts(n.activations)}</span></td>
-      <td><span class="counts">${counts(n.payingMembers)}</span></td>
+      <td><span class="counts">${counts(sm.activations)}</span></td>
+      <td><span class="counts">${counts(sm.paying)}</span></td>
       <td class="num">${money(sm.teamActivation)}</td>
       <td class="num">${money(sm.teamRecurring)}</td>
       <td class="whitespace-nowrap">${leg}</td>
@@ -190,12 +224,9 @@ function teamSection(): string {
   return `
     <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
       <div><h2>${esc(t('team.title'))}</h2><p class="hint mt-0.5 max-w-[60ch]">${esc(t('team.hint'))}</p></div>
-      <div class="flex flex-wrap gap-2">
-        <button type="button" class="btn btn-sm btn-primary" data-action="add-direct">${icon('userPlus', 15)}${esc(t('team.add'))}</button>
-        ${team.length ? `<button type="button" class="btn btn-sm" data-action="structure">${icon('tree', 15)}${esc(t('team.showStructure'))}</button>` : ''}
-      </div>
+      ${team.length ? `<button type="button" class="btn btn-sm" data-action="structure">${icon('tree', 15)}${esc(t('team.showStructure'))}</button>` : ''}
     </div>
-    ${team.length === 0 ? `<p class="panel-quiet text-sm text-ink-2">${esc(t('team.empty'))}</p>` : `
+    ${team.length === 0 ? addPartner(true) : `
     <div class="overflow-x-auto -mx-1 px-1">
       <table class="biz-table team-table">
         <thead><tr>
@@ -210,8 +241,13 @@ function teamSection(): string {
           <td class="num">${money(totalAct)}</td><td class="num">${money(totalRec)}</td><td></td><td></td>
         </tr></tfoot>
       </table>
-    </div>`}`;
+    </div>
+    ${addPartner(false)}`}`;
 }
+
+/** Same dashed "add" button as for activations: under the table, or big when the team is empty. */
+const addPartner = (big: boolean) =>
+  `<button type="button" class="add-row${big ? ' is-big' : ''}" data-action="add-direct">${icon('userPlus', big ? 20 : 16)}${esc(t('team.add'))}</button>`;
 
 /** Add or edit a Partner in a dialog. `parentId` null = a direct Partner. */
 async function partnerDialog(mode: { edit: PartnerNode } | { parentId: string | null }): Promise<void> {
@@ -229,9 +265,21 @@ async function partnerDialog(mode: { edit: PartnerNode } | { parentId: string | 
     <div class="field"><label for="pd-${name}">${esc(label)}</label>
       <div class="input-wrap"><span class="affix">$</span><input id="pd-${name}" type="number" min="0" step="50" inputmode="decimal" name="${name}" value="${draft[name]}"></div></div>`;
 
+  const mem = draft.membership;
+  const sponsor = parent ? parent.name : editing ? t('team.theirSponsor') : t('team.you');
   const body = `<div class="grid gap-5">
     <div class="field"><label for="pd-name">${esc(t('team.name'))}</label>
       <div class="input-wrap"><input id="pd-name" type="text" name="name" value="${esc(draft.name)}" autocomplete="off"></div></div>
+    <div class="panel-quiet grid gap-3">
+      <label class="switch"><input type="checkbox" name="isMember" ${mem ? 'checked' : ''}><span>${esc(t('team.alsoMember'))}</span></label>
+      <div class="grid gap-3 sm:grid-cols-2" data-member-fields ${mem ? '' : 'hidden'}>
+        <div class="field"><label for="pd-mplan">${esc(t('team.memberPlan'))}</label>
+          <div class="input-wrap"><select id="pd-mplan" name="memberPlan">${MEMBER_PLANS.map((p) => `<option value="${p}" ${(mem?.plan ?? 'premium') === p ? 'selected' : ''}>${esc(t(`plans.${p}`))}</option>`).join('')}</select></div></div>
+        <div class="field"><label for="pd-msince">${esc(t('prof.memberSince'))}</label>
+          <div class="input-wrap"><input id="pd-msince" type="date" name="memberSince" value="${esc(mem?.since ?? toIso(new Date()))}"></div></div>
+      </div>
+      <p class="hint">${esc(t('team.alsoMemberHint', { sponsor }))}</p>
+    </div>
     <div><p class="field-label mb-1.5">${esc(t('team.ownActivations'))}</p>${trio('activations')}</div>
     <div><p class="field-label mb-1.5">${esc(t('team.payingMembers'))}</p>${trio('payingMembers')}</div>
     <details ${draft.restActivationVolume || draft.restRecurringVolume ? 'open' : ''}>
@@ -251,13 +299,21 @@ async function partnerDialog(mode: { edit: PartnerNode } | { parentId: string | 
     }
     draft.restActivationVolume = nonNeg('restActivationVolume');
     draft.restRecurringVolume = nonNeg('restRecurringVolume');
+    const isMember = d.querySelector<HTMLInputElement>('[name="isMember"]')!.checked;
+    draft.membership = isMember ? { plan: val('memberPlan') as MemberPlan, since: val('memberSince') || toIso(new Date()) } : null;
   };
 
-  const choice = await openSheet({
+  const opened = openSheet({
     title, body,
     actions: [{ label: t('common.cancel'), value: 'cancel' }, { label: t('common.save'), value: 'save', kind: 'primary' }],
     onAction: (v, d) => { if (v === 'save') read(d); },
   });
+  // The membership fields only show when "Also a Member" is on.
+  const dlg = document.querySelector<HTMLDialogElement>('dialog.sheet[open]:last-of-type');
+  dlg?.querySelector('[name="isMember"]')?.addEventListener('change', (e) => {
+    dlg.querySelector<HTMLElement>('[data-member-fields]')!.hidden = !(e.target as HTMLInputElement).checked;
+  });
+  const choice = await opened;
   if (choice !== 'save') return;
   update((st) => {
     if (editing) Object.assign(findNode(st.month.team, editing.id)!, { ...draft, children: findNode(st.month.team, editing.id)!.children });
@@ -393,7 +449,8 @@ export const calculatorView: View = {
       res.querySelectorAll('details').forEach((d, i) => { if (open[i]) d.open = true; });
     }
     const m = getState().month;
-    if (changed === 'log' || changed.startsWith('month.activationLog')) {
+    // Partner-Members show up in your list too, so team edits refresh it as well.
+    if (changed === 'log' || changed === 'team' || changed.startsWith('month.activationLog')) {
       // Re-render the list; selects and dates only fire on change, so put focus back where it was.
       const path = (document.activeElement as HTMLElement | null)?.dataset?.path;
       const log = root.querySelector('#calc-log');
@@ -402,7 +459,9 @@ export const calculatorView: View = {
     }
     // Steppers: update the totals in place, so typing in a number box isn't interrupted.
     const paying = root.querySelector('[data-total="paying"]');
-    if (paying) paying.textContent = `${money(recurringVolume(m.personalPayingMembers, PLAN_PRICES))} ${t('common.perMonth')}`;
+    if (paying) paying.textContent = payingTotal();
+    const note = root.querySelector('#calc-paying-note');
+    if (note) note.innerHTML = payingNote();
     HISTORY_ROWS.forEach((k) => {
       const cell = root.querySelector(`[data-total="${k}"]`);
       if (cell) cell.textContent = money(activationVolume(m.history[k], PLAN_PRICES));
