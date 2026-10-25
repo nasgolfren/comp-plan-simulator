@@ -30,6 +30,14 @@ export function money(n: number, opts: { cents?: boolean } = {}): string {
   }).format(n);
 }
 
+/** Lengths that can be chosen for Simulation and Goals: months up to 1½ years, then whole years up to 10. */
+export const DURATIONS = [3, 6, 12, 18, 24, 36, 48, 60, 72, 84, 96, 108, 120];
+
+/** "18 months", or "5 years" from two years on. */
+export function durationLabel(months: number): string {
+  return months >= 24 && months % 12 === 0 ? t('common.years', { n: months / 12 }) : t('common.months', { n: months });
+}
+
 export function num(n: number, digits = 0): string {
   return new Intl.NumberFormat(locale(), { maximumFractionDigits: digits }).format(n);
 }

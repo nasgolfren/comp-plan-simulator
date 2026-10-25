@@ -3,12 +3,12 @@
 An unofficial web app that shows how the inCruises compensation plan calculates income
 from numbers the user enters. It is a planning and learning tool, not an income estimate.
 
-- **Dashboard** – rank route, this month's net income, progress to the next rank, conditions, 12-month outlook
-- **Calculator** – one month of activity and teams, with an explanation behind every bonus; exact one-week Weekly Matching check
-- **Simulation** – month-by-month model (6–36 months) with your own growth, churn and team assumptions
-- **Goals** – what a target rank requires, and how much activity the simulation would need to reach a rank or income by a deadline
-- **Scenarios** – save, compare and share (link) setups
-- **Profile & settings** – Member/Partner status, membership, Partner dates, EN/ES, export/import/reset
+- **Welcome** – first-visit setup: Member and/or Partner, membership, since-dates
+- **Dashboard** – rank route, this month's net income, progress to the next rank, conditions, calendar of payments and payouts, 12-month outlook
+- **Structure** – your dated activations, paying members and Partner tree (with a pan/zoom structure view); an explanation behind every bonus
+- **Simulation** – a typical month repeated over 6–36 months: every income and bonus month by month, optionally starting from your Structure
+- **Goals** – pick a rank or monthly income and a deadline; get the monthly plan for a chosen style, a timeline of ranks and a month-by-month table (independent of Simulation)
+- **Profile & settings** – Member/Partner status, membership, since-dates, Reward Points estimate, EN/ES, export/import/reset
 
 All data stays in the browser (`localStorage`). There is no backend and no analytics.
 

@@ -87,6 +87,9 @@ button:not(:disabled), [role="button"], summary { cursor: pointer; }
 }
 }
 
+/* Underlined links lose the underline on hover. Unlayered, so it wins over Tailwind's `underline` utility. */
+a.underline:hover { text-decoration-line: none; }
+
 /* ---------- Components ---------- */
 @layer components {
   /* grid children may shrink below their content width (tables scroll inside instead) */
@@ -453,6 +456,53 @@ button:not(:disabled), [role="button"], summary { cursor: pointer; }
   details.fold > summary::-webkit-details-marker { display: none; }
   details.fold > summary .chev { color: var(--muted); transition: transform .2s; }
   details.fold[open] > summary .chev { transform: rotate(90deg); }
+
+  /* Goals: style choice, monthly plan, timeline */
+  .style-opt { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; text-align: left; border-radius: 14px; border: 1.5px solid var(--line); background: var(--surface-2); transition: border-color .15s, background-color .15s; }
+  .style-opt:hover { border-color: var(--line-strong); }
+  .style-opt[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .style-dot { width: 18px; height: 18px; margin-top: 2px; border-radius: 999px; border: 2px solid var(--line-strong); flex-shrink: 0; }
+  .style-opt[aria-checked="true"] .style-dot { border-color: var(--accent); box-shadow: inset 0 0 0 3px var(--surface-2), inset 0 0 0 10px var(--accent); }
+  .plan-step { padding: 14px 16px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+  .timeline { position: relative; display: grid; gap: 18px; padding-left: 30px; }
+  .timeline::before { content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px; width: 2px; background: var(--line-strong); border-radius: 2px; }
+  .timeline li { position: relative; }
+  .tl-dot { position: absolute; left: -30px; top: 2px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 999px; background: var(--surface); border: 2px solid var(--brand); color: var(--on-accent); }
+  .timeline li.is-goal .tl-dot { background: var(--accent); border-color: var(--accent); }
+  .biz-table tr.is-hit th, .biz-table tr.is-hit td { background: var(--accent-soft); }
+  .sim-table { min-width: 720px; }
+
+  /* Dashboard calendar */
+  .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .cal-head { margin-bottom: 4px; }
+  .cal-head span { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-align: center; padding: 4px 0; }
+  .cal-cell {
+    display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 92px; padding: 6px; text-align: left;
+    border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); min-width: 0; transition: border-color .15s, background-color .15s;
+  }
+  .cal-cell.is-pad { background: transparent; border-color: transparent; }
+  button.cal-cell:hover { border-color: var(--line-strong); }
+  .cal-cell.is-selected { border-color: var(--brand); background: var(--brand-soft); }
+  .cal-num { font-weight: 700; font-size: 0.82rem; color: var(--ink-2); font-variant-numeric: tabular-nums; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; }
+  .cal-cell.is-today .cal-num { background: var(--accent); color: var(--on-accent); }
+  .cal-chips { display: grid; gap: 2px; min-width: 0; }
+  .cal-chip {
+    display: flex; justify-content: space-between; gap: 4px; min-width: 0; padding: 1px 5px; border-radius: 5px; font-size: 0.68rem; font-weight: 600; line-height: 1.5;
+    color: var(--ink); background: color-mix(in srgb, var(--c) 22%, transparent); border-left: 3px solid var(--c);
+  }
+  .cal-chip.activation { background: transparent; border: 1px solid color-mix(in srgb, var(--c) 60%, transparent); border-left-width: 3px; }
+  .cal-chip.deadline { background: transparent; color: var(--muted); border-left-style: dashed; }
+  .cal-chip .num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cal-more { font-size: 0.68rem; color: var(--muted); font-weight: 600; padding-left: 4px; }
+  .cal-dots { display: none; gap: 3px; justify-content: center; margin-top: auto; }
+  .cal-dots i { width: 6px; height: 6px; border-radius: 999px; }
+  @media (max-width: 900px) {
+    .cal-cell { min-height: 54px; align-items: center; padding: 4px 2px; }
+    .cal-chips { display: none; }
+    .cal-dots { display: flex; }
+  }
+  .cal-detail { background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; align-self: start; }
+  .cal-item { padding: 10px 12px; border-radius: 10px; background: var(--surface); border-left: 3px solid var(--c); }
 
   /* Reward Points in the top bar */
   .top-rp { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-weight: 700; font-size: 0.88rem; color: var(--accent); background: var(--accent-soft); white-space: nowrap; }

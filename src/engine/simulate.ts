@@ -3,42 +3,47 @@ import type { RankId } from '../config/plan.ts';
 import { activationVolume, calcMonth, decideRank } from './calc.ts';
 import type { CalcProfile, Leg, MonthResult, PlanCounts, Prices } from './types.ts';
 
+/** Whole people at a regular pace: `count` new Partners every `every` months (e.g. 1 every 2). */
+export interface Cadence { count: number; every: number }
+
+/**
+ * A typical month, repeated. Everything is in whole people and whole registrations:
+ * no percentages of people leaving or growing.
+ */
 export interface SimAssumptions {
   months: number;
   /** Your new personal activations per month, by plan. */
   personalActivations: PlanCounts;
-  /** Direct members already paying when the simulation starts. */
-  startingMembers: PlanCounts;
-  /** Monthly change of your personal activity, e.g. 0.05 = +5% a month. */
-  personalGrowth: number;
-  /** Share of paying members who stop paying each month. */
-  churn: number;
-  /** New direct Partners you add per month (fractions allowed — 0.5 = one every two months). */
-  newPartnersPerMonth: number;
-  /** Activations an average Partner produces per month, by plan. */
+  /** New direct Partners you sponsor. */
+  newPartners: Cadence;
+  /** Activations each Partner makes per month, by plan. */
   partnerActivations: PlanCounts;
-  /** Monthly growth of the number of active Partners inside each team. */
-  teamGrowth: number;
-  /** Share of Partners in a team who stop being active each month. */
-  partnerDropout: number;
-  /** Share of activations that are first-ever activations. */
+  /** New Partners each of your teams adds. */
+  teamNewPartners: Cadence;
+  /** Share of activations that are first-ever activations (for Builders Base Volume). */
   newMemberShare: number;
-  /** Most direct teams the simulation keeps adding. */
+  /** Most new direct teams the simulation adds. */
   maxLegs: number;
+  /** Optional losses, in whole people over time. */
+  losses: Losses;
 }
+
+/**
+ * People leaving, in whole people: `members` stop paying (you and each team lose them at that
+ * pace) and `partners` stop (from your biggest team). Regular, or at random months averaging the
+ * same pace; the randomness is seeded, so the same inputs always give the same result.
+ */
+export interface Losses { on: boolean; random: boolean; members: Cadence; partners: Cadence }
 
 export const DEFAULT_ASSUMPTIONS: SimAssumptions = {
   months: 12,
   personalActivations: { starter: 0, classic: 0, premium: 0 },
-  startingMembers: { starter: 0, classic: 0, premium: 0 },
-  personalGrowth: 0,
-  churn: 0.1,
-  newPartnersPerMonth: 0,
+  newPartners: { count: 0, every: 1 },
   partnerActivations: { starter: 0, classic: 0, premium: 0 },
-  teamGrowth: 0,
-  partnerDropout: 0.1,
+  teamNewPartners: { count: 0, every: 1 },
   newMemberShare: 0.9,
   maxLegs: 10,
+  losses: { on: false, random: false, members: { count: 1, every: 3 }, partners: { count: 1, every: 6 } },
 };
 
 interface SimLeg {
@@ -56,60 +61,99 @@ export interface SimMonth {
   legs: number;
 }
 
+/** Where the simulation starts: your paying members and existing teams (e.g. from Structure). */
+export interface SimStart {
+  members: PlanCounts;
+  legs: { partners: number; members: PlanCounts }[];
+}
+
 export interface SimOptions {
   /** Month (0-based) that counts as the Fast Start month, or -1. */
   fastStartIndex: number;
   start: Date;
+  /** Start from an existing business instead of from zero. */
+  from?: SimStart;
 }
 
-const scale = (c: PlanCounts, k: number): PlanCounts => ({ starter: c.starter * k, classic: c.classic * k, premium: c.premium * k });
+const zero = (): PlanCounts => ({ starter: 0, classic: 0, premium: 0 });
+const times = (c: PlanCounts, k: number): PlanCounts => ({ starter: c.starter * k, classic: c.classic * k, premium: c.premium * k });
 const add = (a: PlanCounts, b: PlanCounts): PlanCounts => ({ starter: a.starter + b.starter, classic: a.classic + b.classic, premium: a.premium + b.premium });
 const total = (c: PlanCounts) => c.starter + c.classic + c.premium;
-const mul = (members: PlanCounts, prices: Prices) => MEMBER_PLANS.reduce((s, p) => s + members[p] * prices.monthly[p], 0);
+const recurring = (members: PlanCounts, prices: Prices) => MEMBER_PLANS.reduce((s, p) => s + members[p] * prices.monthly[p], 0);
+/** Whether a cadence adds people in month `m` (counting from its first month). */
+const due = (c: Cadence, m: number) => c.count > 0 && m >= 0 && m % Math.max(1, c.every) === 0;
+
+/** Small seeded random number generator (mulberry32): the same seed gives the same sequence. */
+function seeded(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(s ^ (s >>> 15), 1 | s);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Remove up to n whole members, always from the plan with the most members. */
+function removeMembers(c: PlanCounts, n: number): void {
+  for (let i = 0; i < n; i++) {
+    const p = MEMBER_PLANS.reduce((best, q) => (c[q] > c[best] ? q : best), MEMBER_PLANS[0]);
+    if (c[p] <= 0) return;
+    c[p] -= 1;
+  }
+}
 
 /**
- * Month-by-month model. Members accumulate from activations and leave at the churn rate;
- * monthly payments start the month after activation. Each direct team grows by `teamGrowth`
- * and loses Partners at `partnerDropout`. A team's own rank is estimated from its production
- * without the per-leg cap, so it is an approximation.
+ * Month-by-month model in whole people. Your Members add up from your activations and pay
+ * from the month after; new direct Partners join on their cadence, each starting a team that
+ * adds Partners on the team cadence. Every Partner makes the same activations each month.
+ * Without losses nobody leaves, so read the results as an upper bound. With losses, people leave
+ * from the end of the first period on (e.g. "every 3 months" → months 3, 6, 9…). A team's own
+ * rank is estimated from its production without the per-leg cap.
  */
 export function simulate(a: SimAssumptions, profile: CalcProfile, prices: Prices, opts: SimOptions): SimMonth[] {
   const out: SimMonth[] = [];
-  let members: PlanCounts = { ...a.startingMembers };
-  const legs: SimLeg[] = [];
-  let partnerAccumulator = 0;
+  let members: PlanCounts = { ...zero(), ...opts.from?.members };
+  // Existing teams count as joined before month 0; maxLegs only limits new ones.
+  const legs: SimLeg[] = (opts.from?.legs ?? []).map((l) => ({ joined: -1, partners: l.partners, members: { ...l.members } }));
+  const maxLegs = legs.length + a.maxLegs;
   const personalHistory: number[] = [];
-  const qbi = Math.pow(1 - a.churn, 3);
+  const loss = a.losses;
+  const rand = seeded(20261);
+  /** Whether people leave in month m: regularly at the end of each period, or at random at the same average pace. */
+  const leaves = (c: Cadence, m: number) => loss.on && c.count > 0 && (loss.random ? rand() < 1 / Math.max(1, c.every) : (m + 1) % Math.max(1, c.every) === 0);
 
   for (let m = 0; m < a.months; m++) {
-    // New direct partners
-    partnerAccumulator += a.newPartnersPerMonth;
-    while (partnerAccumulator >= 1 && legs.length < a.maxLegs) {
-      legs.push({ joined: m, partners: 1, members: { starter: 0, classic: 0, premium: 0 } });
-      partnerAccumulator -= 1;
+    if (leaves(loss.members, m)) {
+      removeMembers(members, loss.members.count);
+      legs.forEach((l) => removeMembers(l.members, loss.members.count));
     }
-    if (legs.length >= a.maxLegs) partnerAccumulator = 0;
+    if (leaves(loss.partners, m)) {
+      for (let i = 0; i < loss.partners.count && legs.length; i++) {
+        // From the biggest team; a team whose only Partner leaves is gone, with its members.
+        const big = legs.reduce((b, l) => (l.partners > b.partners ? l : b), legs[0]);
+        if (big.partners > 1) big.partners -= 1;
+        else legs.splice(legs.indexOf(big), 1);
+      }
+    }
+    // Teams grow first (not in the month they start), then new direct Partners join.
+    legs.forEach((l) => { if (m > l.joined && due(a.teamNewPartners, m - l.joined - 1)) l.partners += a.teamNewPartners.count; });
+    if (due(a.newPartners, m)) {
+      for (let i = 0; i < a.newPartners.count && legs.length < maxLegs; i++) legs.push({ joined: m, partners: 1, members: zero() });
+    }
 
-    const growth = Math.pow(1 + a.personalGrowth, m);
-    const personalNew = scale(a.personalActivations, growth);
-    // Recurring comes from members who were already paying; churn applies first.
-    members = scale(members, 1 - a.churn);
-
+    const personalNew = { ...a.personalActivations };
     const calcLegs: Leg[] = legs.map((l, i) => {
-      if (m > l.joined) l.partners = l.partners * (1 + a.teamGrowth) * (1 - a.partnerDropout);
-      l.members = scale(l.members, 1 - a.churn);
-      const recurring = mul(l.members, prices);
-      const headShare = Math.min(1, l.partners);
-      const head = scale(a.partnerActivations, headShare);
-      const others = scale(a.partnerActivations, Math.max(0, l.partners - headShare));
-      const otherVolume = activationVolume(others, prices);
+      const legRecurring = recurring(l.members, prices); // members from earlier months pay this month
+      const head = { ...a.partnerActivations };
+      const others = times(a.partnerActivations, l.partners - 1);
       const legNew = add(head, others);
       const legAct = activationVolume(legNew, prices);
-      const rank = decideRank(legAct + recurring, [], legAct).paidRank;
+      const rank = decideRank(legAct + legRecurring, [], legAct).paidRank;
       l.members = add(l.members, legNew);
       return {
         id: `leg${i + 1}`, label: `Team ${i + 1}`, rank,
-        headActivations: head, otherActivationVolume: otherVolume, recurringVolume: recurring,
+        headActivations: head, otherActivationVolume: activationVolume(others, prices), recurringVolume: legRecurring,
       };
     });
 
@@ -124,7 +168,7 @@ export function simulate(a: SimAssumptions, profile: CalcProfile, prices: Prices
       personalActivations: personalNew,
       personalPayingMembers: members,
       newMemberShare: a.newMemberShare,
-      qbi,
+      qbi: 1, // nobody stops paying in this model
       matchingWeeks: 'auto',
       minActivationsLongWindow: longWindow,
       legs: calcLegs,
@@ -143,22 +187,57 @@ export function simulate(a: SimAssumptions, profile: CalcProfile, prices: Prices
   return out;
 }
 
-/** Multiply every activity input (activations, new Partners) by k. */
-export function scaleActivity(a: SimAssumptions, k: number): SimAssumptions {
+// ---------- Goal planner ----------
+
+export type Goal = { kind: 'rank'; rank: RankId } | { kind: 'income'; net: number };
+export type GoalStyle = 'personal' | 'balanced' | 'team';
+
+/** A plan's shape as average rates per month; the planner scales it and rounds to whole people. */
+interface Shape { personal: PlanCounts; partners: number; partner: PlanCounts; team: number }
+
+/**
+ * The shape of a monthly plan for each style. The planner finds the smallest multiple of it
+ * that reaches the goal, in whole registrations and whole Partners.
+ */
+export const GOAL_STYLES: Record<GoalStyle, Shape> = {
+  personal: { personal: { starter: 0, classic: 2, premium: 1 }, partners: 0.25, partner: { starter: 0, classic: 1, premium: 0 }, team: 0 },
+  balanced: { personal: { starter: 0, classic: 1, premium: 0.5 }, partners: 0.5, partner: { starter: 0, classic: 1, premium: 0.25 }, team: 0.25 },
+  team: { personal: { starter: 0, classic: 1, premium: 0 }, partners: 1, partner: { starter: 0, classic: 1, premium: 0.5 }, team: 0.5 },
+};
+
+const whole = (x: number) => Math.ceil(x - 1e-9);
+/** Paces a person can plan with (the same choices as the Simulation form). */
+export const CADENCE_MONTHS = [1, 2, 3, 4, 6, 12];
+/** A rate per month as whole people: n per month, or 1 every 2/3/4/6/12 months. Rounded up. */
+export function toCadence(rate: number): Cadence {
+  if (rate <= 1e-9) return { count: 0, every: 1 };
+  if (rate >= 1) return { count: whole(rate), every: 1 };
+  const every = [...CADENCE_MONTHS].reverse().find((n) => 1 / n >= rate - 1e-9) ?? 1;
+  return { count: 1, every };
+}
+const wholeCounts = (c: PlanCounts): PlanCounts => ({ starter: whole(c.starter), classic: whole(c.classic), premium: whole(c.premium) });
+
+/** The style's shape scaled by k, in whole registrations and whole Partners. */
+function planAt(style: GoalStyle, k: number, months: number): SimAssumptions {
+  const s = GOAL_STYLES[style];
   return {
-    ...a,
-    personalActivations: scale(a.personalActivations, k),
-    partnerActivations: scale(a.partnerActivations, k),
-    newPartnersPerMonth: a.newPartnersPerMonth * k,
+    ...DEFAULT_ASSUMPTIONS, months,
+    personalActivations: wholeCounts(times(s.personal, k)),
+    newPartners: toCadence(s.partners * k),
+    partnerActivations: wholeCounts(times(s.partner, k)),
+    teamNewPartners: toCadence(s.team * k),
   };
 }
 
-export type Goal = { kind: 'rank'; rank: RankId } | { kind: 'income'; net: number };
-
-export interface GoalResult {
-  reachedIn: number | null;          // month index with current assumptions
-  factor: number | null;              // activity multiplier needed to reach it by the deadline
-  scaled: SimAssumptions | null;
+export interface GoalPlan {
+  /** The whole-number monthly plan that reaches the goal, or null if none does. */
+  plan: SimAssumptions | null;
+  /** Month by month with that plan, up to the deadline. */
+  months: SimMonth[];
+  /** Month index the goal is reached, or null. */
+  reachedIn: number | null;
+  /** First month each new rank is reached along the way. */
+  milestones: { index: number; rank: RankId }[];
 }
 
 function hits(goal: Goal, m: SimMonth): boolean {
@@ -168,25 +247,37 @@ function hits(goal: Goal, m: SimMonth): boolean {
 }
 
 /**
- * When does the goal happen with the current assumptions, and how much more activity
- * would reach it by `deadline` (month count)? Uses bisection on an activity multiplier.
+ * Find the smallest whole-number monthly plan of the chosen style that reaches the goal within
+ * `deadline` months (bisection on a multiplier of the style's shape), then lay it out month by month.
  */
-export function planGoal(goal: Goal, a: SimAssumptions, deadline: number, profile: CalcProfile, prices: Prices, opts: SimOptions): GoalResult {
-  const base = simulate({ ...a, months: Math.max(a.months, deadline) }, profile, prices, opts);
-  const hit = base.findIndex((m) => hits(goal, m));
-  const reachedIn = hit >= 0 ? hit : null;
+export function planGoal(goal: Goal, style: GoalStyle, deadline: number, profile: CalcProfile, prices: Prices, opts: SimOptions): GoalPlan {
+  const run = (a: SimAssumptions) => simulate(a, profile, prices, opts);
+  const reaches = (a: SimAssumptions) => run(a).some((m) => hits(goal, m));
 
-  const reachesBy = (k: number) => simulate({ ...scaleActivity(a, k), months: deadline }, profile, prices, opts).some((m) => hits(goal, m));
-  const hasActivity = total(a.personalActivations) + total(a.partnerActivations) + a.newPartnersPerMonth > 0;
-  if (!hasActivity) return { reachedIn, factor: null, scaled: null };
-
-  let hi = 1;
-  while (!reachesBy(hi) && hi < 64) hi *= 2;
-  if (!reachesBy(hi)) return { reachedIn, factor: null, scaled: null };
-  let lo = hi === 1 ? 0 : hi / 2;
-  for (let i = 0; i < 18; i++) {
-    const mid = (lo + hi) / 2;
-    if (reachesBy(mid)) hi = mid; else lo = mid;
+  let plan: SimAssumptions | null = null;
+  if (reaches(planAt(style, 0, deadline))) {
+    plan = planAt(style, 0, deadline); // already there with what you have
+  } else {
+    let hi = 1;
+    while (!reaches(planAt(style, hi, deadline)) && hi < 64) hi *= 2;
+    if (reaches(planAt(style, hi, deadline))) {
+      let lo = hi === 1 ? 0 : hi / 2;
+      for (let i = 0; i < 16; i++) {
+        const mid = (lo + hi) / 2;
+        if (reaches(planAt(style, mid, deadline))) hi = mid; else lo = mid;
+      }
+      plan = planAt(style, hi, deadline);
+    }
   }
-  return { reachedIn, factor: hi, scaled: scaleActivity(a, hi) };
+
+  if (!plan) return { plan: null, months: [], reachedIn: null, milestones: [] };
+  const months = run(plan);
+  const hit = months.findIndex((m) => hits(goal, m));
+  const milestones: GoalPlan['milestones'] = [];
+  let best = -1;
+  months.forEach((m, i) => {
+    const r = rankIndex(m.result.qpRank);
+    if (r > best && m.result.qpRank !== 'none') { milestones.push({ index: i, rank: m.result.qpRank }); best = r; }
+  });
+  return { plan, months, reachedIn: hit >= 0 ? hit : null, milestones };
 }

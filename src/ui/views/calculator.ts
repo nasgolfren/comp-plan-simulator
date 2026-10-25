@@ -5,8 +5,8 @@ import { activationVolume, recurringVolume } from '../../engine/calc.ts';
 import { findNode, flattenTeam, monthActivity, removeNode, summarizeTeam } from '../../engine/team.ts';
 import type { ActivationKind, PartnerNode, PlanCounts } from '../../engine/types.ts';
 import { locale, money, t } from '../../i18n/index.ts';
-import { getPath, getState, newActivation, newPartner, setPath, update, uid } from '../../state/store.ts';
-import { confirmSheet, esc, icon, openSheet, toast } from '../dom.ts';
+import { getPath, getState, newActivation, newPartner, setPath, update } from '../../state/store.ts';
+import { confirmSheet, esc, icon, openSheet } from '../dom.ts';
 import { footnote } from '../components/disclaimer.ts';
 import { costsAndNet, currentMonth, incomeLines, isMembershipFreeNote, membershipFreeBox, noteHtml, productionTable, rankName } from '../components/results.ts';
 import { openStructure, structureSvg } from '../components/structure.ts';
@@ -286,10 +286,7 @@ function resultsPanel(): string {
       <summary class="cursor-pointer text-sm font-semibold text-brand-ink">${esc(t('calc.production'))}</summary>
       <div class="mt-2">${productionTable(r)}</div>
     </details>
-    <div class="flex flex-wrap items-center justify-between gap-3 mt-5">
-      ${footnote()}
-      <button type="button" class="btn btn-sm" data-action="save-scenario">${icon('save', 15)}${esc(t('calc.saveScenario'))}</button>
-    </div>`;
+    <div class="mt-5">${footnote()}</div>`;
 }
 
 function miniBar(): string {
@@ -384,19 +381,10 @@ export const calculatorView: View = {
         update((s) => { s.month.activationLog = s.month.activationLog.filter((x) => x.id !== id); }, 'log');
       } else if (a === 'see-result') {
         root.querySelector('#calc-results-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else if (a === 'save-scenario') {
-        update((s) => {
-          s.scenarios.push({
-            id: uid(), name: t('scen.defaultName', { n: s.scenarios.length + 1 }), createdAt: new Date().toISOString(),
-            month: structuredClone(s.month), sim: structuredClone(s.sim),
-          });
-        }, 'scenarios');
-        toast(t('calc.saved'));
       }
     });
   },
   update(root, changed) {
-    if (changed === 'scenarios') return;
     const res = root.querySelector<HTMLElement>('#calc-results');
     if (res) {
       // keep expanded explanations open while the user types

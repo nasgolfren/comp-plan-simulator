@@ -7,6 +7,7 @@ import { legend, mountChart } from '../components/charts.ts';
 import { footnote } from '../components/disclaimer.ts';
 import { currentMonth, currentSim, incomeSeries, noteHtml, rankName, seriesColor } from '../components/results.ts';
 import { rankRoute } from '../components/route.ts';
+import { calendarClick, calendarPanel } from '../components/calendar.ts';
 import type { View } from './view.ts';
 
 function progressRow(label: string, have: number, need: number, accent = false): string {
@@ -107,9 +108,12 @@ function body(): string {
         ${cond(t('cond.renewal'), !s.profile.isPartner ? 'notMet' : days === null ? 'unknown' : r.conditions.renewalCurrent ? 'met' : 'notMet')}
         ${cond(t('cond.minActivations'), !r.conditions.minActivations.required ? 'notRequired' : r.conditions.minActivations.met ? 'met' : 'notMet')}
         ${cond(t('cond.membershipFree'), r.conditions.membershipFree ? 'met' : 'notMet')}
-        ${cond(t('cond.fastStart'), r.conditions.fastStart ? 'met' : 'notThisMonth')}      </ul>
+        ${cond(t('cond.fastStart'), r.conditions.fastStart ? 'met' : 'notThisMonth')}
+      </ul>
     </section>
   </div>
+
+  <section class="panel mb-4" aria-labelledby="cal-h" id="dash-cal">${calendarPanel()}</section>
 
   <div class="grid grid-cols-1 gap-4 lg:grid-cols-5 mb-4">
     <section class="panel lg:col-span-2" aria-labelledby="bd-h">
@@ -160,7 +164,19 @@ function drawCharts(root: HTMLElement): void {
 
 export const dashboardView: View = {
   render: body,
-  mount: drawCharts,
+  mount(root) {
+    drawCharts(root);
+    root.addEventListener('click', (e) => {
+      if (!calendarClick(e.target as HTMLElement)) return;
+      const cal = root.querySelector<HTMLElement>('#dash-cal');
+      if (!cal) return;
+      // Keep focus on the control that was used (the day or the arrow), after re-rendering.
+      const a = document.activeElement as HTMLElement | null;
+      const key = a?.dataset.day ? `[data-day="${a.dataset.day}"]` : a?.dataset.cal ? `[data-cal="${a.dataset.cal}"]` : null;
+      cal.innerHTML = calendarPanel();
+      if (key) cal.querySelector<HTMLElement>(key)?.focus();
+    });
+  },
   update(root) { root.innerHTML = body(); drawCharts(root); },
 };
 

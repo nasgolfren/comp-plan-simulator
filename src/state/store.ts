@@ -2,7 +2,8 @@ import { MEMBERSHIP_POINTS, MEMBER_PLANS, PARTNER_RENEWAL, PLAN_PRICES } from '.
 import { toIso } from '../engine/activity.ts';
 import type { MemberPlan, RankId } from '../config/plan.ts';
 import { DEFAULT_ASSUMPTIONS } from '../engine/simulate.ts';
-import type { SimAssumptions, SimOptions } from '../engine/simulate.ts';
+import type { GoalStyle, SimAssumptions, SimOptions } from '../engine/simulate.ts';
+import { structureStart } from '../engine/team.ts';
 import type { ActivationEntry, ActivityHistory, BusinessMonth, CalcProfile, Leg, PartnerNode, PlanCounts } from '../engine/types.ts';
 
 export type Lang = 'en' | 'es';
@@ -17,15 +18,15 @@ export interface Profile {
   memberSince: string;
 }
 
-export interface GoalState { kind: 'rank' | 'income'; rank: RankId; net: number; deadline: number }
-
-export interface Scenario {
-  id: string;
-  name: string;
-  createdAt: string;
-  month: BusinessMonth;
-  sim: SimAssumptions;
+export interface GoalState {
+  kind: 'rank' | 'income'; rank: RankId; net: number; deadline: number;
+  style: GoalStyle;
+  /** Start from your current Structure instead of from zero. */
+  fromStructure: boolean;
 }
+
+/** Simulation settings: the monthly assumptions plus where to start from. */
+export type SimSettings = SimAssumptions & { fromStructure: boolean };
 
 export interface AppState {
   version: 1;
@@ -35,9 +36,8 @@ export interface AppState {
   onboarded: boolean;
   profile: Profile;
   month: BusinessMonth;
-  sim: SimAssumptions;
+  sim: SimSettings;
   goal: GoalState;
-  scenarios: Scenario[];
 }
 
 const STORAGE_KEY = 'comp-plan-simulator:v1';
@@ -109,9 +109,8 @@ export function defaultState(): AppState {
       history: emptyHistory(),
       team: [],
     },
-    sim: structuredClone(DEFAULT_ASSUMPTIONS),
-    goal: { kind: 'rank', rank: 'md', net: 1000, deadline: 12 },
-    scenarios: [],
+    sim: { ...structuredClone(DEFAULT_ASSUMPTIONS), fromStructure: true },
+    goal: { kind: 'rank', rank: 'md', net: 1000, deadline: 12, style: 'balanced', fromStructure: true },
   };
 }
 
@@ -139,7 +138,13 @@ function dropRemoved(s: AppState): AppState {
   delete (s.profile as unknown as Record<string, unknown>).tlbMonths;
   delete (s.profile as unknown as Record<string, unknown>).lastRenewal;
   s.month = migrateMonth(s.month);
-  s.scenarios.forEach((sc) => { sc.month = migrateMonth(sc.month); });
+  delete loose.scenarios;
+  // The simulation used to work with percentages of people leaving and growing.
+  const oldSim = s.sim as unknown as Record<string, unknown>;
+  ['startingMembers', 'personalGrowth', 'churn', 'partnerDropout', 'teamGrowth', 'newPartnersPerMonth'].forEach((k) => delete oldSim[k]);
+  // New Partners in Simulation are entered per month only (a pace is used just for people leaving).
+  s.sim.newPartners.every = 1;
+  s.sim.teamNewPartners.every = 1;
   return s;
 }
 
@@ -265,14 +270,15 @@ export function calcProfile(s: AppState = state, today = new Date()): CalcProfil
   };
 }
 
-export function simOptions(s: AppState = state, today = new Date()): SimOptions {
+/** Simulation options; `fromStructure` starts from your current paying members and teams. */
+export function simOptions(s: AppState = state, fromStructure = false, today = new Date()): SimOptions {
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
   const fs = fastStartDate(s);
   const idx = fs ? (fs.getFullYear() - start.getFullYear()) * 12 + fs.getMonth() - start.getMonth() : -1;
-  return { start, fastStartIndex: idx >= 0 ? idx : -1 };
+  return { start, fastStartIndex: idx >= 0 ? idx : -1, from: fromStructure ? structureStart(s.month, PLAN_PRICES) : undefined };
 }
 
-// ---------- Export / import / share ----------
+// ---------- Export / import ----------
 
 export function exportJson(): string {
   return JSON.stringify(state, null, 2);
@@ -282,25 +288,6 @@ export function importJson(text: string): void {
   const data = JSON.parse(text);
   if (!data || typeof data !== 'object' || !('month' in data)) throw new Error('invalid');
   replaceState(data as AppState);
-}
-
-const toBase64Url = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const fromBase64Url = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
-
-export interface SharePayload { name: string; month: BusinessMonth; sim: SimAssumptions }
-
-export function shareLink(name: string, month: BusinessMonth, sim: SimAssumptions): string {
-  const payload: SharePayload = { name, month, sim };
-  const url = new URL(location.href);
-  url.hash = `#/share/${toBase64Url(JSON.stringify(payload))}`;
-  return url.toString();
-}
-
-export function decodeShare(data: string): SharePayload | null {
-  try {
-    const p = JSON.parse(fromBase64Url(data));
-    return p && p.month && p.sim ? { ...p, month: migrateMonth(p.month) } : null;
-  } catch { return null; }
 }
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);

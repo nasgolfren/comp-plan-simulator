@@ -2,7 +2,8 @@ import type { RankId } from '../config/plan.ts';
 import { deriveActivity } from './activity.ts';
 import type { DerivedActivity } from './activity.ts';
 import { activationVolume, decideRank, recurringVolume } from './calc.ts';
-import type { BusinessMonth, Leg, MonthInput, PartnerNode, Prices } from './types.ts';
+import type { SimStart } from './simulate.ts';
+import type { BusinessMonth, Leg, MonthInput, PartnerNode, PlanCounts, Prices } from './types.ts';
 
 export interface NodeSummary {
   /** The Partner's own activation production. */
@@ -82,6 +83,22 @@ export function toMonthInput(month: BusinessMonth, prices: Prices, today = new D
     matchingWeeks: a.matchingShare,
     minActivationsLongWindow: a.longWindowMet,
     legs,
+  };
+}
+
+/**
+ * Your Structure as the starting point of a simulation: your paying members, and each direct
+ * team with its Partner count and paying members. A team's unlisted monthly payments are
+ * counted as whole Classic members (rounded).
+ */
+export function structureStart(month: BusinessMonth, prices: Prices): SimStart {
+  const sumMembers = (n: PartnerNode): PlanCounts => n.children.map(sumMembers).reduce((a, b) => ({
+    starter: a.starter + b.starter, classic: a.classic + b.classic, premium: a.premium + b.premium,
+  }), { ...n.payingMembers, classic: n.payingMembers.classic + Math.round(n.restRecurringVolume / prices.monthly.classic) });
+  const sums = summarizeTeam(month.team, prices);
+  return {
+    members: { ...month.personalPayingMembers },
+    legs: month.team.map((n) => ({ partners: 1 + sums.get(n.id)!.size, members: sumMembers(n) })),
   };
 }
 

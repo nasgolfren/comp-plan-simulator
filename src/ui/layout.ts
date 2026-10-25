@@ -6,14 +6,13 @@ import { flag } from './flags.ts';
 import { currentMonth } from './components/results.ts';
 import { rankById } from '../config/plan.ts';
 
-export type Route = 'welcome' | 'dashboard' | 'calculator' | 'simulation' | 'goals' | 'scenarios' | 'profile';
+export type Route = 'welcome' | 'dashboard' | 'calculator' | 'simulation' | 'goals' | 'profile';
 
 export const NAV: { route: Route; icon: string }[] = [
   { route: 'dashboard', icon: 'dashboard' },
   { route: 'calculator', icon: 'tree' },
   { route: 'simulation', icon: 'chart' },
   { route: 'goals', icon: 'target' },
-  { route: 'scenarios', icon: 'layers' },
 ];
 
 /** App mark: a wave inside a rounded square — no company logo. */

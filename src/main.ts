@@ -1,7 +1,6 @@
 import './style.css';
 import { t } from './i18n/index.ts';
-import { decodeShare, getState, setPath, subscribe, uid, update } from './state/store.ts';
-import { esc, openSheet, toast } from './ui/dom.ts';
+import { getState, setPath, subscribe, update } from './state/store.ts';
 import { readInput } from './ui/fields.ts';
 import { markActive, shell, topBadges, welcomeShell } from './ui/layout.ts';
 import type { Route } from './ui/layout.ts';
@@ -10,7 +9,6 @@ import { calculatorView } from './ui/views/calculator.ts';
 import { dashboardView } from './ui/views/dashboard.ts';
 import { goalsView } from './ui/views/goals.ts';
 import { profileView } from './ui/views/profile.ts';
-import { scenariosView } from './ui/views/scenarios.ts';
 import { simulationView } from './ui/views/simulation.ts';
 import { welcomeView } from './ui/views/welcome.ts';
 import type { View } from './ui/views/view.ts';
@@ -21,7 +19,6 @@ const views: Record<Route, View> = {
   calculator: calculatorView,
   simulation: simulationView,
   goals: goalsView,
-  scenarios: scenariosView,
   profile: profileView,
 };
 
@@ -60,8 +57,7 @@ subscribe((_, changed) => {
   if (container) views[route].update?.(container, changed);
 });
 
-window.addEventListener('hashchange', async () => {
-  if (await handleShare()) return;
+window.addEventListener('hashchange', () => {
   const next = parseRoute();
   if (next === route && container) return;
   const shellChanges = (next === 'welcome') !== (route === 'welcome');
@@ -93,35 +89,9 @@ document.addEventListener('click', (e) => {
   if (lang) update((s) => { s.lang = lang.dataset.setLang as 'en' | 'es'; }, 'lang');
 });
 
-// ---------- shared scenario links ----------
-async function handleShare(): Promise<boolean> {
-  const m = location.hash.match(/^#\/share\/(.+)$/);
-  if (!m) return false;
-  const payload = decodeShare(m[1]);
-  history.replaceState(null, '', `${location.pathname}#/scenarios`);
-  route = 'scenarios';
-  renderView();
-  if (!payload) return true;
-  const choice = await openSheet({
-    title: t('scen.importTitle'),
-    body: `<p class="text-ink-2">${esc(t('scen.importBody', { name: payload.name }))}</p>`,
-    actions: [{ label: t('scen.importNo'), value: 'no' }, { label: t('scen.importYes'), value: 'yes', kind: 'primary' }],
-  });
-  if (choice === 'yes') {
-    update((s) => {
-      s.scenarios.push({ id: uid(), name: payload.name, createdAt: new Date().toISOString(), month: payload.month, sim: payload.sim });
-    }, 'scenarios:list');
-    toast(t('calc.saved'));
-  }
-  return true;
-}
-
 // ---------- start ----------
-// First visit: set up the profile before anything else (shared links still open directly).
-if (!getState().onboarded && !location.hash.startsWith('#/share/')) history.replaceState(null, '', '#/welcome');
+// First visit: set up the profile before anything else.
+if (!getState().onboarded) history.replaceState(null, '', '#/welcome');
 route = parseRoute();
 renderAll();
-(async () => {
-  if (!getState().disclaimerAccepted) await openDisclaimer(true);
-  await handleShare();
-})();
+if (!getState().disclaimerAccepted) void openDisclaimer(true);

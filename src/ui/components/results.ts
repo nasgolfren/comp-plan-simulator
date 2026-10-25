@@ -21,7 +21,7 @@ export function currentMonth(): MonthResult {
 
 export function currentSim() {
   const s = getState();
-  return simulate(s.sim, { ...calcProfile(s), fastStartMonth: false }, PLAN_PRICES, simOptions(s));
+  return simulate(s.sim, { ...calcProfile(s), fastStartMonth: false }, PLAN_PRICES, simOptions(s, s.sim.fromStructure));
 }
 
 export function noteHtml(n: Note): string {
