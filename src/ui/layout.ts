@@ -25,7 +25,7 @@ const mark = `<svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"
 export function shell(): string {
   const s = getState();
   return `
-  <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 btn btn-primary">Skip to content</a>
+  <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 btn btn-primary">${esc(t('common.skip'))}</a>
   <div class="min-h-dvh lg:grid lg:grid-cols-[252px_minmax(0,1fr)]">
     <div class="hidden lg:block border-r border-line bg-surface"><aside class="flex flex-col gap-6 sticky top-0 h-dvh px-4 py-5">
       <a href="#/dashboard" class="flex items-center gap-3 px-2">${mark}

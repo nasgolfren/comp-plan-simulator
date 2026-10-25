@@ -36,6 +36,7 @@ export const en = {
   'common.showTable': 'Show as table',
   'common.showChart': 'Show as chart',
   'common.copied': 'Link copied',
+  'common.skip': 'Skip to content',
   'common.months': '{n} months',
   'common.years': '{n} years',
 
