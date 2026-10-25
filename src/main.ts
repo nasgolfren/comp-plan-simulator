@@ -3,7 +3,7 @@ import { t } from './i18n/index.ts';
 import { decodeShare, getState, setPath, subscribe, uid, update } from './state/store.ts';
 import { esc, openSheet, toast } from './ui/dom.ts';
 import { readInput } from './ui/fields.ts';
-import { markActive, shell, topPoints, welcomeShell } from './ui/layout.ts';
+import { markActive, shell, topBadges, welcomeShell } from './ui/layout.ts';
 import type { Route } from './ui/layout.ts';
 import { openDisclaimer } from './ui/components/disclaimer.ts';
 import { calculatorView } from './ui/views/calculator.ts';
@@ -55,7 +55,8 @@ function renderAll(): void {
 subscribe((_, changed) => {
   if (changed === '*' || changed === 'lang') { renderAll(); return; }
   if (changed === 'disclaimerAccepted' || changed === 'onboarded') return;
-  if (changed.startsWith('profile.')) document.getElementById('top-rp')?.replaceWith(document.createRange().createContextualFragment(topPoints()));
+  // Rank, Membership Free and points can change with any edit.
+  document.getElementById('top-badges')?.replaceWith(document.createRange().createContextualFragment(topBadges()));
   if (container) views[route].update?.(container, changed);
 });
 

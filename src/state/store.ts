@@ -1,8 +1,9 @@
-import { MEMBERSHIP_POINTS, PARTNER_RENEWAL, PLAN_PRICES } from '../config/plan.ts';
+import { MEMBERSHIP_POINTS, MEMBER_PLANS, PARTNER_RENEWAL, PLAN_PRICES } from '../config/plan.ts';
+import { toIso } from '../engine/activity.ts';
 import type { MemberPlan, RankId } from '../config/plan.ts';
 import { DEFAULT_ASSUMPTIONS } from '../engine/simulate.ts';
 import type { SimAssumptions, SimOptions } from '../engine/simulate.ts';
-import type { CalcProfile, Leg, MonthInput, PlanCounts } from '../engine/types.ts';
+import type { ActivationEntry, ActivityHistory, BusinessMonth, CalcProfile, Leg, PartnerNode, PlanCounts } from '../engine/types.ts';
 
 export type Lang = 'en' | 'es';
 
@@ -22,7 +23,7 @@ export interface Scenario {
   id: string;
   name: string;
   createdAt: string;
-  month: MonthInput;
+  month: BusinessMonth;
   sim: SimAssumptions;
 }
 
@@ -33,7 +34,7 @@ export interface AppState {
   /** The welcome profile setup has been completed once. */
   onboarded: boolean;
   profile: Profile;
-  month: MonthInput;
+  month: BusinessMonth;
   sim: SimAssumptions;
   goal: GoalState;
   scenarios: Scenario[];
@@ -42,14 +43,57 @@ export interface AppState {
 const STORAGE_KEY = 'comp-plan-simulator:v1';
 const zero = (): PlanCounts => ({ starter: 0, classic: 0, premium: 0 });
 
-export const newLeg = (n: number): Leg => ({
-  id: `leg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-  label: `Team ${n}`,
-  rank: 'none',
-  headActivations: zero(),
-  otherActivationVolume: 0,
-  recurringVolume: 0,
+export const newPartner = (name: string): PartnerNode => ({
+  id: `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+  name,
+  activations: zero(),
+  payingMembers: zero(),
+  restActivationVolume: 0,
+  restRecurringVolume: 0,
+  children: [],
 });
+
+export const emptyHistory = (): ActivityHistory => ({ months1to2: zero(), months3to5: zero(), months6to11: zero(), qbiNew: 0, qbiPaying: 0 });
+
+export function newActivation(date: string): ActivationEntry {
+  return { id: `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, date, plan: 'classic', kind: 'new' };
+}
+
+type OldMonth = Partial<BusinessMonth> & {
+  legs?: Leg[];
+  personalActivations?: PlanCounts;
+  newMemberShare?: unknown; qbi?: unknown; matchingWeeks?: unknown; minActivationsLongWindow?: unknown;
+};
+
+/**
+ * Bring a month saved by an older version up to date: a flat list of teams ("legs") becomes
+ * Partners, and activation counts become dated entries on the 1st of this month.
+ */
+function migrateMonth(m: BusinessMonth): BusinessMonth {
+  const old = m as OldMonth;
+  if (Array.isArray(old.legs)) {
+    if (!old.team?.length) {
+      old.team = old.legs.map((l) => ({
+        ...newPartner(l.label), id: l.id, activations: l.headActivations,
+        restActivationVolume: l.otherActivationVolume, restRecurringVolume: l.recurringVolume,
+      }));
+    }
+    delete old.legs;
+  }
+  if (old.personalActivations) {
+    if (!old.activationLog?.length) {
+      const d = new Date();
+      const first = toIso(new Date(d.getFullYear(), d.getMonth(), 1));
+      old.activationLog = MEMBER_PLANS.flatMap((p) => Array.from({ length: old.personalActivations![p] }, () => ({ ...newActivation(first), plan: p })));
+    }
+    delete old.personalActivations;
+  }
+  delete old.newMemberShare; delete old.qbi; delete old.matchingWeeks; delete old.minActivationsLongWindow;
+  old.activationLog ??= [];
+  old.history = { ...emptyHistory(), ...old.history };
+  old.team ??= [];
+  return old as BusinessMonth;
+}
 
 export function defaultState(): AppState {
   return {
@@ -60,13 +104,10 @@ export function defaultState(): AppState {
     // Nothing is chosen until the welcome setup; memberPlan only counts once isMember is on.
     profile: { isMember: false, isPartner: false, memberPlan: 'classic', partnerSince: '', memberSince: '' },
     month: {
-      personalActivations: zero(),
+      activationLog: [],
       personalPayingMembers: zero(),
-      newMemberShare: 0.9,
-      qbi: 0.7,
-      matchingWeeks: 'auto',
-      minActivationsLongWindow: false,
-      legs: [],
+      history: emptyHistory(),
+      team: [],
     },
     sim: structuredClone(DEFAULT_ASSUMPTIONS),
     goal: { kind: 'rank', rank: 'md', net: 1000, deadline: 12 },
@@ -97,6 +138,8 @@ function dropRemoved(s: AppState): AppState {
   delete loose.theme;
   delete (s.profile as unknown as Record<string, unknown>).tlbMonths;
   delete (s.profile as unknown as Record<string, unknown>).lastRenewal;
+  s.month = migrateMonth(s.month);
+  s.scenarios.forEach((sc) => { sc.month = migrateMonth(sc.month); });
   return s;
 }
 
@@ -244,9 +287,9 @@ export function importJson(text: string): void {
 const toBase64Url = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromBase64Url = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
 
-export interface SharePayload { name: string; month: MonthInput; sim: SimAssumptions }
+export interface SharePayload { name: string; month: BusinessMonth; sim: SimAssumptions }
 
-export function shareLink(name: string, month: MonthInput, sim: SimAssumptions): string {
+export function shareLink(name: string, month: BusinessMonth, sim: SimAssumptions): string {
   const payload: SharePayload = { name, month, sim };
   const url = new URL(location.href);
   url.hash = `#/share/${toBase64Url(JSON.stringify(payload))}`;
@@ -256,7 +299,7 @@ export function shareLink(name: string, month: MonthInput, sim: SimAssumptions):
 export function decodeShare(data: string): SharePayload | null {
   try {
     const p = JSON.parse(fromBase64Url(data));
-    return p && p.month && p.sim ? p : null;
+    return p && p.month && p.sim ? { ...p, month: migrateMonth(p.month) } : null;
   } catch { return null; }
 }
 

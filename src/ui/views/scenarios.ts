@@ -2,7 +2,8 @@ import { PLAN_PRICES } from '../../config/plan.ts';
 import { calcMonth } from '../../engine/calc.ts';
 import { simulate } from '../../engine/simulate.ts';
 import type { SimAssumptions } from '../../engine/simulate.ts';
-import type { MonthInput } from '../../engine/types.ts';
+import { toMonthInput } from '../../engine/team.ts';
+import type { BusinessMonth } from '../../engine/types.ts';
 import { locale, money, t } from '../../i18n/index.ts';
 import { calcProfile, getState, shareLink, simOptions, uid, update } from '../../state/store.ts';
 import { confirmSheet, esc, icon, toast } from '../dom.ts';
@@ -11,11 +12,11 @@ import { footnote } from '../components/disclaimer.ts';
 import { rankName } from '../components/results.ts';
 import type { View } from './view.ts';
 
-function evaluate(month: MonthInput, sim: SimAssumptions) {
+function evaluate(month: BusinessMonth, sim: SimAssumptions) {
   const s = getState();
   const prices = PLAN_PRICES;
   const profile = calcProfile(s);
-  const m = calcMonth(month, profile, prices);
+  const m = calcMonth(toMonthInput(month, prices), profile, prices);
   const run = simulate(sim, { ...profile, fastStartMonth: false }, prices, simOptions(s));
   const last = run[run.length - 1].result;
   return {

@@ -1,66 +1,274 @@
-import { RANKS, WEEKLY_MATCHING, rankById } from '../../config/plan.ts';
-import { weeklyMatchingBonus } from '../../engine/calc.ts';
-import { money, t } from '../../i18n/index.ts';
-import { getState, newLeg, update, uid } from '../../state/store.ts';
-import { esc, icon, toast } from '../dom.ts';
-import { money$, numField, numInput, pct, planTrio, selectField, textInput, toggle } from '../fields.ts';
+import { DAB, MEMBER_PLANS, PLAN_PRICES, rankById } from '../../config/plan.ts';
+import type { MemberPlan } from '../../config/plan.ts';
+import { inMonth, toIso } from '../../engine/activity.ts';
+import { activationVolume, recurringVolume } from '../../engine/calc.ts';
+import { findNode, flattenTeam, monthActivity, removeNode, summarizeTeam } from '../../engine/team.ts';
+import type { ActivationKind, PartnerNode, PlanCounts } from '../../engine/types.ts';
+import { locale, money, t } from '../../i18n/index.ts';
+import { getPath, getState, newActivation, newPartner, setPath, update, uid } from '../../state/store.ts';
+import { confirmSheet, esc, icon, openSheet, toast } from '../dom.ts';
 import { footnote } from '../components/disclaimer.ts';
-import { costsAndNet, currentMonth, incomeLines, noteHtml, productionTable, rankName } from '../components/results.ts';
+import { costsAndNet, currentMonth, incomeLines, isMembershipFreeNote, membershipFreeBox, noteHtml, productionTable, rankName } from '../components/results.ts';
+import { openStructure, structureSvg } from '../components/structure.ts';
 import type { View } from './view.ts';
 
-// The one-week matching checker is a scratch tool, kept in memory only.
-const week = { personal: 0, directs: [{ production: 0, dab: 0, mab: 0 }, { production: 0, dab: 0, mab: 0 }] };
+// Partners collapsed in the table (memory only).
+const collapsed = new Set<string>();
 
-function legsSection(): string {
-  const legs = getState().month.legs;
-  const rankOpts = RANKS.map((r) => ({ value: r.id, label: r.id === 'none' ? t('rank.none') : r.name }));
+function structureNow(): string {
+  const r = currentMonth();
+  const team = getState().month.team;
+  return structureSvg(team, summarizeTeam(team, PLAN_PRICES), { rank: r.qpRank === 'none' ? 'none' : r.paidRank, volume: r.production.tav + r.production.rqp });
+}
+
+const counts = (c: PlanCounts) => MEMBER_PLANS.map((p) => (c[p] ? `<span class="count ${p}">${c[p]}</span>` : '<span class="count zero">0</span>')).join('');
+
+function stepper(path: string, label: string): string {
+  const v = Number(getPath(path)) || 0;
+  return `<div class="stepper">
+    <button type="button" data-step="${path}" data-d="-1" aria-label="${esc(label)} −1">${icon('minus', 14)}</button>
+    <input type="number" min="0" step="1" inputmode="numeric" data-path="${path}" data-kind="num" value="${v}" aria-label="${esc(label)}">
+    <button type="button" data-step="${path}" data-d="1" aria-label="${esc(label)} +1">${icon('plus', 14)}</button>
+  </div>`;
+}
+
+const KINDS: ActivationKind[] = ['new', 'upgrade', 'reactivation'];
+const HISTORY_ROWS = ['months1to2', 'months3to5', 'months6to11'] as const;
+
+/** A row of −/+ steppers for the three plans, with the row's dollar total at the end. */
+function planRow(base: string, label: string, total: string, totalKey: string): string {
+  return `<tr>
+    <th scope="row">${esc(label)}</th>
+    ${MEMBER_PLANS.map((p) => `<td>${stepper(`${base}.${p}`, `${label}: ${t(`plans.${p}`)}`)}</td>`).join('')}
+    <td class="num font-semibold" data-total="${totalKey}">${total}</td>
+  </tr>`;
+}
+const planHead = (last: string) =>
+  `<thead><tr><th></th>${MEMBER_PLANS.map((p) => `<th><span class="plan-dot ${p}"></span> ${esc(t(`plans.${p}`))}</th>`).join('')}<th>${esc(last)}</th></tr></thead>`;
+
+/** Your dated activations this month. */
+function logSection(): string {
+  const log = getState().month.activationLog;
+  const today = new Date();
+  const min = toIso(new Date(today.getFullYear(), today.getMonth(), 1));
+  const max = toIso(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+  const counted = log.filter((e) => inMonth(e, today));
+  const production = counted.reduce((s, e) => s + PLAN_PRICES.activation[e.plan], 0);
+  const dab = counted.reduce((s, e) => s + DAB[e.plan], 0);
+  const sel = (path: string, value: string, opts: { v: string; label: string }[], label: string) =>
+    `<div class="input-wrap !min-h-9"><select class="!h-9" data-path="${path}" data-kind="select" aria-label="${esc(label)}">${opts.map((o) => `<option value="${o.v}" ${o.v === value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>`;
+
   return `
-    <div class="flex flex-wrap items-start justify-between gap-3 mb-1">
-      <div><h2>${esc(t('calc.teams'))}</h2><p class="hint mt-0.5">${esc(t('calc.teamsHint'))}</p></div>
-      <button type="button" class="btn btn-sm" data-action="add-leg">${icon('plus', 15)}${esc(t('calc.addTeam'))}</button>
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+      <div><h3 class="!text-base">${esc(t('calc.activations'))}</h3><p class="hint mt-0.5">${esc(t('calc.activationsHint'))}</p></div>
+      <button type="button" class="btn btn-sm btn-primary" data-action="add-activation">${icon('plus', 15)}${esc(t('calc.addActivation'))}</button>
     </div>
-    ${legs.length === 0 ? `<p class="panel-quiet mt-3 text-sm text-ink-2">${esc(t('calc.noTeams'))}</p>` : ''}
-    <div class="grid gap-3 mt-3">
-      ${legs.map((l, i) => `
-        <fieldset class="panel-quiet grid gap-3">
-          <legend class="sr-only">${esc(l.label)}</legend>
-          <div class="flex flex-wrap items-center gap-2">
-            <div class="flex-1 min-w-[9rem]">${textInput(`month.legs.${i}.label`, t('leg.name'))}</div>
-            <span class="pill pill-warn hidden" data-capped="${l.id}">${icon('alert', 12)}${esc(t('leg.capped'))}</span>
-            <button type="button" class="btn btn-ghost btn-sm icon-btn btn-danger" data-action="remove-leg" data-id="${l.id}" aria-label="${esc(t('leg.remove'))}: ${esc(l.label)}">${icon('trash', 16)}</button>
-          </div>
-          <div class="grid gap-3 sm:grid-cols-3 items-end">
-            ${selectField(t('leg.rank'), `month.legs.${i}.rank`, rankOpts)}
-            ${numField(t('leg.other'), `month.legs.${i}.otherActivationVolume`, money$)}
-            ${numField(t('leg.recurring'), `month.legs.${i}.recurringVolume`, money$)}
-          </div>
-          <div><p class="field-label mb-1.5">${esc(t('leg.head'))}</p>${planTrio(`month.legs.${i}.headActivations`)}</div>
-        </fieldset>`).join('')}
+    ${log.length === 0 ? `<p class="panel-quiet text-sm text-ink-2">${esc(t('calc.noActivations'))}</p>` : `
+    <div class="overflow-x-auto -mx-1 px-1">
+      <table class="biz-table log-table">
+        <thead><tr><th>${esc(t('calc.colDate'))}</th><th>${esc(t('calc.colPlan'))}</th><th>${esc(t('calc.colType'))}</th><th class="num">${esc(t('calc.colProduction'))}</th><th class="num">DAB</th><th><span class="sr-only">${esc(t('team.actions'))}</span></th></tr></thead>
+        <tbody>${log.map((e, i) => {
+          const ok = inMonth(e, today);
+          return `<tr class="${ok ? '' : 'is-muted'}">
+            <td><div class="input-wrap !min-h-9"><input class="!h-9" type="date" min="${min}" max="${max}" data-path="month.activationLog.${i}.date" data-kind="text" value="${esc(e.date)}" aria-label="${esc(t('calc.colDate'))}"></div>
+              ${ok ? '' : `<span class="pill pill-warn mt-1">${icon('alert', 12)}${esc(t('calc.otherMonth'))}</span>`}</td>
+            <td>${sel(`month.activationLog.${i}.plan`, e.plan, MEMBER_PLANS.map((p) => ({ v: p, label: t(`plans.${p}`) })), t('calc.colPlan'))}</td>
+            <td>${sel(`month.activationLog.${i}.kind`, e.kind, KINDS.map((k) => ({ v: k, label: t(`calc.kind.${k}`) })), t('calc.colType'))}</td>
+            <td class="num">${ok ? money(PLAN_PRICES.activation[e.plan]) : '—'}</td>
+            <td class="num">${ok ? money(DAB[e.plan]) : '—'}</td>
+            <td><span class="row-actions"><button type="button" class="btn btn-ghost btn-sm icon-btn btn-danger" data-action="remove-activation" data-id="${e.id}" aria-label="${esc(t('calc.removeActivation'))}">${icon('trash', 16)}</button></span></td>
+          </tr>`;
+        }).join('')}</tbody>
+        <tfoot><tr><th scope="row" colspan="3">${esc(t('calc.activationsTotal', { n: counted.length }))} <span class="counts ml-2 align-middle">${counts(deriveCounts(counted))}</span></th>
+          <td class="num">${money(production)}</td><td class="num">${money(dab)}</td><td></td></tr></tfoot>
+      </table>
+    </div>`}`;
+}
+
+const deriveCounts = (entries: { plan: MemberPlan }[]): PlanCounts => {
+  const c: PlanCounts = { starter: 0, classic: 0, premium: 0 };
+  entries.forEach((e) => { c[e.plan] += 1; });
+  return c;
+};
+
+/** What the calculation works out from your entries, shown so nothing is hidden. */
+function derivedStrip(): string {
+  const { activity: a } = monthActivity(getState().month, PLAN_PRICES);
+  const r = currentMonth();
+  const dateFmt = new Intl.DateTimeFormat(locale(), { day: 'numeric', month: 'numeric' });
+  const minMet = r.conditions.minActivations.met;
+  const minRequired = r.conditions.minActivations.required;
+  return `
+    <p class="eyebrow mb-2">${esc(t('calc.derived'))}</p>
+    <div class="flex flex-wrap gap-2">
+      <span class="pill pill-muted">${esc(t('calc.dNew', { pct: Math.round(a.newShare * 100) }))}</span>
+      <span class="pill pill-muted">${esc(t('calc.dQbi', { pct: Math.round(a.qbi * 100) }))}</span>
+      <span class="pill ${!minRequired ? 'pill-muted' : minMet ? 'pill-good' : 'pill-bad'}">${esc(t(!minRequired ? 'calc.dMinNotRequired' : minMet ? 'calc.dMinMet' : 'calc.dMinNot'))}</span>
+    </div>
+    <div class="mt-3">
+      <p class="text-sm text-ink-2">${esc(t('calc.dMatching', { n: a.weeks.filter((w) => w.qualifies).length, total: a.weeks.length }))}</p>
+      <div class="flex flex-wrap gap-1.5 mt-1.5">${a.weeks.map((w) => `<span class="week-chip ${w.qualifies ? 'ok' : ''}" title="${esc(t('calc.weekDetail', { personal: money(w.personal), directs: money(w.directs) }))}">${w.qualifies ? icon('check', 12) : icon('x', 12)}${esc(dateFmt.format(w.start))}</span>`).join('')}</div>
+      <p class="hint mt-1.5">${esc(t('calc.dMatchingHint'))}</p>
     </div>`;
 }
 
-function qualitySection(): string {
-  const m = getState().month;
-  const auto = m.matchingWeeks === 'auto';
+/** Earlier months as plain numbers: Minimum Activations windows and QBI. */
+function historySection(): string {
+  const h = getState().month.history;
+  const qbi = h.qbiNew > 0 ? Math.round(Math.min(1, h.qbiPaying / h.qbiNew) * 100) : 100;
   return `
-    <h2 class="mb-3">${esc(t('calc.quality'))}</h2>
-    <div class="grid gap-4 sm:grid-cols-2">
-      ${numField(t('calc.newShare'), 'month.newMemberShare', { ...pct, hint: t('calc.newShareHint') })}
-      ${numField(t('calc.qbi'), 'month.qbi', { ...pct, hint: t('calc.qbiHint') })}
+    <p class="hint mb-3">${esc(t('hist.hint'))}</p>
+    <div class="overflow-x-auto -mx-1 px-1">
+      <table class="biz-table you-table">
+        ${planHead(t('calc.colProduction'))}
+        <tbody>${HISTORY_ROWS.map((k) => planRow(`month.history.${k}`, t(`hist.${k}`), money(activationVolume(h[k], PLAN_PRICES)), k)).join('')}</tbody>
+      </table>
     </div>
-    <div class="mt-4 grid gap-2">
-      <p class="field-label">${esc(t('calc.matching'))}</p>
-      <div class="seg w-full sm:w-auto [&>button]:flex-1" role="group" aria-label="${esc(t('calc.matching'))}">
-        <button type="button" data-action="matching-auto" aria-pressed="${auto}">${esc(t('calc.matchingAuto'))}</button>
-        <button type="button" data-action="matching-manual" aria-pressed="${!auto}">${esc(t('calc.matchingManual'))}</button>
+    <div class="grid gap-4 sm:grid-cols-[1fr_1fr_auto] items-end mt-5">
+      <div class="field"><span class="field-label">${esc(t('hist.qbiNew'))}</span>${stepper('month.history.qbiNew', t('hist.qbiNew'))}</div>
+      <div class="field"><span class="field-label">${esc(t('hist.qbiPaying'))}</span>${stepper('month.history.qbiPaying', t('hist.qbiPaying'))}</div>
+      <div><p class="eyebrow">QBI</p><p class="font-display text-2xl font-bold num" data-total="qbi">${qbi}%</p></div>
+    </div>`;
+}
+
+/** You this month: dated activations, paying members, and what's worked out from them. */
+function youSection(): string {
+  const m = getState().month;
+  return `
+    <div class="mb-4"><h2>${esc(t('calc.you'))}</h2><p class="hint mt-0.5">${esc(t('calc.youHint'))}</p></div>
+    <div id="calc-log">${logSection()}</div>
+    <div class="mt-6">
+      <h3 class="!text-base mb-2">${esc(t('calc.rowPaying'))}</h3>
+      <div class="overflow-x-auto -mx-1 px-1">
+        <table class="biz-table you-table">
+          ${planHead(t('calc.colVolume'))}
+          <tbody>${planRow('month.personalPayingMembers', t('calc.rowPaying'), `${money(recurringVolume(m.personalPayingMembers, PLAN_PRICES))} ${t('common.perMonth')}`, 'paying')}</tbody>
+        </table>
       </div>
-      ${auto ? '' : `<div class="max-w-40">${numInput('month.matchingWeeks', pct)}</div>`}
     </div>
-    <div class="mt-4">${toggle(t('calc.longWindow'), 'month.minActivationsLongWindow')}</div>`;
+    <div id="calc-derived" class="mt-6 pt-4 border-t border-line">${derivedStrip()}</div>`;
+}
+
+/** Your organization as a tree table: one row per Partner, indented by level. */
+function teamSection(): string {
+  const s = getState();
+  const team = s.month.team;
+  const sums = summarizeTeam(team, PLAN_PRICES);
+  const r = currentMonth();
+  const capped = new Set(r.nextRank?.cappedLegIds ?? []);
+
+  const rows: string[] = [];
+  const walk = (nodes: PartnerNode[], level: number) => nodes.forEach((n) => {
+    const sm = sums.get(n.id)!;
+    const open = !collapsed.has(n.id);
+    const leg = level === 0 ? `<span class="num">${money(sm.teamActivation + sm.teamRecurring)}</span>${capped.has(n.id) ? ` <span class="pill pill-warn !px-2" title="${esc(t('leg.capped'))}">${icon('alert', 12)}</span>` : ''}` : '<span class="text-muted">—</span>';
+    rows.push(`<tr class="${level ? 'is-child' : ''}">
+      <th scope="row"><span class="tree-cell" style="--lvl:${level}">
+        ${n.children.length ? `<button type="button" class="tree-toggle" data-toggle="${n.id}" aria-expanded="${open}" aria-label="${esc(n.name)}">${icon('chevron', 14)}</button>` : '<span class="tree-toggle-spacer"></span>'}
+        <span class="truncate">${esc(n.name)}</span>${sm.size ? `<span class="text-muted text-xs font-normal whitespace-nowrap">${esc(t('team.below', { n: sm.size }))}</span>` : ''}
+      </span></th>
+      <td><span class="pill ${sm.rank === 'none' ? 'pill-muted' : 'pill-brand'}">${esc(sm.rank === 'none' ? '—' : rankById(sm.rank).short)}</span></td>
+      <td><span class="counts">${counts(n.activations)}</span></td>
+      <td><span class="counts">${counts(n.payingMembers)}</span></td>
+      <td class="num">${money(sm.teamActivation)}</td>
+      <td class="num">${money(sm.teamRecurring)}</td>
+      <td class="whitespace-nowrap">${leg}</td>
+      <td><span class="row-actions">
+        <button type="button" class="btn btn-ghost btn-sm icon-btn" data-action="add-below" data-id="${n.id}" title="${esc(t('team.addBelow'))}" aria-label="${esc(t('team.addBelow'))}: ${esc(n.name)}">${icon('userPlus', 16)}</button>
+        <button type="button" class="btn btn-ghost btn-sm icon-btn" data-action="edit" data-id="${n.id}" title="${esc(t('team.edit'))}" aria-label="${esc(t('team.edit'))}: ${esc(n.name)}">${icon('edit', 16)}</button>
+        <button type="button" class="btn btn-ghost btn-sm icon-btn btn-danger" data-action="remove" data-id="${n.id}" title="${esc(t('team.remove'))}" aria-label="${esc(t('team.remove'))}: ${esc(n.name)}">${icon('trash', 16)}</button>
+      </span></td>
+    </tr>`);
+    if (open) walk(n.children, level + 1);
+  });
+  walk(team, 0);
+
+  const totalAct = team.reduce((a, n) => a + sums.get(n.id)!.teamActivation, 0);
+  const totalRec = team.reduce((a, n) => a + sums.get(n.id)!.teamRecurring, 0);
+  const people = team.reduce((a, n) => a + 1 + sums.get(n.id)!.size, 0);
+
+  return `
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+      <div><h2>${esc(t('team.title'))}</h2><p class="hint mt-0.5 max-w-[60ch]">${esc(t('team.hint'))}</p></div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-sm btn-primary" data-action="add-direct">${icon('userPlus', 15)}${esc(t('team.add'))}</button>
+        ${team.length ? `<button type="button" class="btn btn-sm" data-action="structure">${icon('tree', 15)}${esc(t('team.showStructure'))}</button>` : ''}
+      </div>
+    </div>
+    ${team.length === 0 ? `<p class="panel-quiet text-sm text-ink-2">${esc(t('team.empty'))}</p>` : `
+    <div class="overflow-x-auto -mx-1 px-1">
+      <table class="biz-table team-table">
+        <thead><tr>
+          <th>${esc(t('team.colPartner'))}</th><th>${esc(t('team.colRank'))}</th>
+          <th>${esc(t('team.colOwn'))}<span class="th-sub">S · C · P</span></th>
+          <th>${esc(t('team.colPaying'))}<span class="th-sub">S · C · P</span></th>
+          <th>${esc(t('team.colTeamVolume'))}</th><th>${esc(t('team.colMonthly'))}</th><th>${esc(t('team.colLeg'))}</th><th><span class="sr-only">${esc(t('team.actions'))}</span></th>
+        </tr></thead>
+        <tbody>${rows.join('')}</tbody>
+        <tfoot><tr>
+          <th scope="row">${esc(t('team.total', { n: people }))}</th><td></td><td></td><td></td>
+          <td class="num">${money(totalAct)}</td><td class="num">${money(totalRec)}</td><td></td><td></td>
+        </tr></tfoot>
+      </table>
+    </div>`}`;
+}
+
+/** Add or edit a Partner in a dialog. `parentId` null = a direct Partner. */
+async function partnerDialog(mode: { edit: PartnerNode } | { parentId: string | null }): Promise<void> {
+  const s = getState();
+  const editing = 'edit' in mode ? mode.edit : null;
+  const parent = !editing && 'parentId' in mode && mode.parentId ? findNode(s.month.team, mode.parentId) : null;
+  const count = flattenTeam(s.month.team).length;
+  const draft: PartnerNode = editing ? structuredClone(editing) : newPartner(t('team.defaultName', { n: count + 1 }));
+  const title = editing ? t('team.dialogEdit', { name: editing.name }) : parent ? t('team.dialogAddBelow', { name: parent.name }) : t('team.dialogAdd');
+
+  const trio = (key: 'activations' | 'payingMembers') => `<div class="plan-trio">${MEMBER_PLANS.map((p) => `
+    <div class="field"><label for="pd-${key}-${p}"><span class="plan-dot ${p}" aria-hidden="true"></span>${esc(t(`plans.${p}`))}</label>
+      <div class="input-wrap"><input id="pd-${key}-${p}" type="number" min="0" step="1" inputmode="numeric" name="${key}.${p}" value="${draft[key][p]}"></div></div>`).join('')}</div>`;
+  const money$In = (name: 'restActivationVolume' | 'restRecurringVolume', label: string) => `
+    <div class="field"><label for="pd-${name}">${esc(label)}</label>
+      <div class="input-wrap"><span class="affix">$</span><input id="pd-${name}" type="number" min="0" step="50" inputmode="decimal" name="${name}" value="${draft[name]}"></div></div>`;
+
+  const body = `<div class="grid gap-5">
+    <div class="field"><label for="pd-name">${esc(t('team.name'))}</label>
+      <div class="input-wrap"><input id="pd-name" type="text" name="name" value="${esc(draft.name)}" autocomplete="off"></div></div>
+    <div><p class="field-label mb-1.5">${esc(t('team.ownActivations'))}</p>${trio('activations')}</div>
+    <div><p class="field-label mb-1.5">${esc(t('team.payingMembers'))}</p>${trio('payingMembers')}</div>
+    <details ${draft.restActivationVolume || draft.restRecurringVolume ? 'open' : ''}>
+      <summary class="text-sm font-semibold text-brand-ink">${esc(t('team.rest'))}</summary>
+      <p class="hint mt-1.5 mb-3">${esc(t('team.restHint'))}</p>
+      <div class="grid gap-3 sm:grid-cols-2">${money$In('restActivationVolume', t('team.restActivation'))}${money$In('restRecurringVolume', t('team.restRecurring'))}</div>
+    </details>
+  </div>`;
+
+  const read = (d: HTMLDialogElement) => {
+    const val = (n: string) => d.querySelector<HTMLInputElement>(`[name="${n}"]`)!.value;
+    const nonNeg = (n: string) => Math.max(0, Math.round(Number(val(n)) || 0));
+    draft.name = val('name').trim() || draft.name;
+    for (const p of MEMBER_PLANS) {
+      draft.activations[p] = nonNeg(`activations.${p}`);
+      draft.payingMembers[p] = nonNeg(`payingMembers.${p}`);
+    }
+    draft.restActivationVolume = nonNeg('restActivationVolume');
+    draft.restRecurringVolume = nonNeg('restRecurringVolume');
+  };
+
+  const choice = await openSheet({
+    title, body,
+    actions: [{ label: t('common.cancel'), value: 'cancel' }, { label: t('common.save'), value: 'save', kind: 'primary' }],
+    onAction: (v, d) => { if (v === 'save') read(d); },
+  });
+  if (choice !== 'save') return;
+  update((st) => {
+    if (editing) Object.assign(findNode(st.month.team, editing.id)!, { ...draft, children: findNode(st.month.team, editing.id)!.children });
+    else if (parent) { findNode(st.month.team, parent.id)!.children.push(draft); collapsed.delete(parent.id); }
+    else st.month.team.push(draft);
+  }, 'team');
 }
 
 function resultsPanel(): string {
   const r = currentMonth();
+  const notes = r.notes.filter((n) => !isMembershipFreeNote(n)); // shown in its own box below
   return `
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -70,8 +278,9 @@ function resultsPanel(): string {
       </div>
       ${r.qpRank !== 'none' ? `<span class="pill ${r.tlbStatus === 'full' ? 'pill-good' : r.tlbStatus === 'partial' ? 'pill-warn' : 'pill-muted'}">${esc(t(`tlb.${r.tlbStatus}`))}</span>` : ''}
     </div>
-    ${r.notes.length ? `<div class="grid gap-2 mt-4">${r.notes.map(noteHtml).join('')}</div>` : ''}
-    <div class="mt-4">${incomeLines(r)}</div>
+    ${notes.length ? `<div class="grid gap-2 mt-4">${notes.map(noteHtml).join('')}</div>` : ''}
+    <div class="mt-4">${membershipFreeBox(r)}</div>
+    <div class="mt-3">${incomeLines(r)}</div>
     ${costsAndNet(r)}
     <details class="mt-4">
       <summary class="cursor-pointer text-sm font-semibold text-brand-ink">${esc(t('calc.production'))}</summary>
@@ -81,38 +290,6 @@ function resultsPanel(): string {
       ${footnote()}
       <button type="button" class="btn btn-sm" data-action="save-scenario">${icon('save', 15)}${esc(t('calc.saveScenario'))}</button>
     </div>`;
-}
-
-function weeklySection(): string {
-  return `
-    <h2>${esc(t('weekly.title'))}</h2>
-    <p class="hint mt-0.5 mb-4">${esc(t('weekly.intro'))}</p>
-    <div class="grid gap-4">
-      <div class="field max-w-72"><label for="wk-personal">${esc(t('weekly.personal'))}</label>
-        <div class="input-wrap"><span class="affix">$</span><input id="wk-personal" type="number" min="0" step="50" inputmode="decimal" data-week="personal" value="${week.personal}"></div></div>
-      ${week.directs.map((d, i) => `
-        <fieldset class="panel-quiet">
-          <legend class="field-label px-1">${esc(t('weekly.direct', { n: i + 1 }))}</legend>
-          <div class="grid gap-3 grid-cols-3">
-            ${(['production', 'dab', 'mab'] as const).map((k) => `<div class="field"><label for="wk-${i}-${k}" class="!font-medium">${esc(t(`weekly.${k}`))}</label>
-              <div class="input-wrap"><span class="affix">$</span><input id="wk-${i}-${k}" type="number" min="0" step="10" inputmode="decimal" data-week="${i}.${k}" value="${d[k]}"></div></div>`).join('')}
-          </div>
-        </fieldset>`).join('')}
-      <div><button type="button" class="btn btn-sm" data-action="week-add">${icon('plus', 15)}${esc(t('weekly.add'))}</button></div>
-      <div id="week-result" aria-live="polite">${weeklyResult()}</div>
-    </div>`;
-}
-
-function weeklyResult(): string {
-  const team = week.directs.reduce((s, d) => s + d.production, 0);
-  const r = weeklyMatchingBonus({ personalProduction: week.personal, directs: week.directs.map((d) => ({ production: d.production, dabPaid: d.dab, mabPaid: d.mab })) });
-  return `<div class="flex flex-wrap items-baseline justify-between gap-2 border-t border-line pt-3">
-      <span class="font-display font-bold">${esc(t('weekly.result'))}</span>
-      <span class="font-display font-bold text-2xl num">${money(r.amount)}</span>
-    </div>
-    <p class="text-sm mt-1 ${r.qualified ? 'text-good' : 'text-ink-2'}">${esc(r.qualified
-      ? t('weekly.ok', { personal: money(week.personal), team: money(team) })
-      : t('weekly.no', { pMin: money(WEEKLY_MATCHING.personalMin), tMin: money(WEEKLY_MATCHING.teamMin), personal: money(week.personal), team: money(team) }))}</p>`;
 }
 
 function miniBar(): string {
@@ -134,17 +311,12 @@ function body(): string {
   </header>
   <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_400px] items-start">
     <div class="grid grid-cols-1 gap-4 min-w-0">
-      <section class="panel">
-        <h2>${esc(t('calc.personal'))}</h2>
-        <p class="hint mt-0.5 mb-3">${esc(t('calc.personalHint'))}</p>
-        ${planTrio('month.personalActivations')}
-        <h2 class="mt-6">${esc(t('calc.paying'))}</h2>
-        <p class="hint mt-0.5 mb-3">${esc(t('calc.payingHint'))}</p>
-        ${planTrio('month.personalPayingMembers')}
-      </section>
-      <section class="panel" id="calc-legs">${legsSection()}</section>
-      <section class="panel" id="calc-quality">${qualitySection()}</section>
-      <section class="panel" id="calc-weekly">${weeklySection()}</section>
+      <section class="panel" id="calc-you">${youSection()}</section>
+      <section class="panel" id="calc-team">${teamSection()}</section>
+      <details class="panel fold">
+        <summary><h2>${esc(t('hist.title'))}</h2>${icon('chevron', 18, 'chev')}</summary>
+        <div id="calc-history" class="mt-3">${historySection()}</div>
+      </details>
     </div>
     <aside class="panel lg:sticky lg:top-20" aria-labelledby="calc-res-h" id="calc-results-wrap">
       <h2 id="calc-res-h" class="sr-only">${esc(t('calc.result'))}</h2>
@@ -155,36 +327,61 @@ function body(): string {
   <div id="calc-mini" class="lg:hidden fixed inset-x-0 z-20 bg-surface border-t border-line shadow-[0_-6px_20px_rgb(7_21_35/0.08)]" style="bottom:calc(56px + env(safe-area-inset-bottom))">${miniBar()}</div>`;
 }
 
-function refreshCapped(root: HTMLElement): void {
-  const r = currentMonth();
-  const capped = new Set(r.nextRank?.cappedLegIds ?? []);
-  root.querySelectorAll<HTMLElement>('[data-capped]').forEach((el) => el.classList.toggle('hidden', !capped.has(el.dataset.capped!)));
+function renderTeam(root: HTMLElement): void {
+  const el = root.querySelector('#calc-team');
+  if (el) el.innerHTML = teamSection();
 }
 
 export const calculatorView: View = {
   render: body,
   mount(root) {
-    refreshCapped(root);
-    root.addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
+    root.addEventListener('click', async (e) => {
+      const target = e.target as HTMLElement;
+      const step = target.closest<HTMLElement>('[data-step]');
+      if (step) {
+        const path = step.dataset.step!;
+        const next = Math.max(0, (Number(getPath(path)) || 0) + Number(step.dataset.d));
+        setPath(path, next);
+        const input = step.parentElement?.querySelector<HTMLInputElement>('input');
+        if (input) input.value = String(next);
+        return;
+      }
+      const toggleBtn = target.closest<HTMLElement>('[data-toggle]');
+      if (toggleBtn) {
+        const id = toggleBtn.dataset.toggle!;
+        if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+        renderTeam(root);
+        root.querySelector<HTMLElement>(`[data-toggle="${id}"]`)?.focus();
+        return;
+      }
+      const btn = target.closest<HTMLElement>('[data-action]');
       if (!btn) return;
       const a = btn.dataset.action;
-      if (a === 'add-leg') {
-        update((s) => { s.month.legs.push(newLeg(s.month.legs.length + 1)); }, 'legs');
-        root.querySelector('#calc-legs')!.innerHTML = legsSection();
-        refreshCapped(root);
-        const inputs = root.querySelectorAll<HTMLInputElement>('#calc-legs input[data-kind="text"]');
-        inputs[inputs.length - 1]?.focus();
-      } else if (a === 'remove-leg') {
-        update((s) => { s.month.legs = s.month.legs.filter((l) => l.id !== btn.dataset.id); }, 'legs');
-        root.querySelector('#calc-legs')!.innerHTML = legsSection();
-        refreshCapped(root);
-      } else if (a === 'matching-auto' || a === 'matching-manual') {
-        update((s) => { s.month.matchingWeeks = a === 'matching-auto' ? 'auto' : 1; }, 'month.matchingWeeks');
-        root.querySelector('#calc-quality')!.innerHTML = qualitySection();
-      } else if (a === 'week-add') {
-        week.directs.push({ production: 0, dab: 0, mab: 0 });
-        root.querySelector('#calc-weekly')!.innerHTML = weeklySection();
+      const id = btn.dataset.id;
+      if (a === 'add-direct') await partnerDialog({ parentId: null });
+      else if (a === 'add-below' && id) await partnerDialog({ parentId: id });
+      else if (a === 'edit' && id) {
+        const n = findNode(getState().month.team, id);
+        if (n) await partnerDialog({ edit: n });
+      } else if (a === 'remove' && id) {
+        const n = findNode(getState().month.team, id);
+        if (!n) return;
+        const below = summarizeTeam([n], PLAN_PRICES).get(n.id)!.size;
+        const msg = below ? t('team.removeConfirmTree', { name: n.name, n: below }) : t('team.removeConfirm', { name: n.name });
+        if (await confirmSheet(t('team.remove'), msg, t('team.remove'), t('common.cancel'), true)) {
+          update((s) => { removeNode(s.month.team, id); }, 'team');
+        }
+      } else if (a === 'structure') {
+        openStructure(structureNow, async (pid) => {
+          const n = findNode(getState().month.team, pid);
+          if (n) await partnerDialog({ edit: n });
+        });
+      } else if (a === 'add-activation') {
+        update((s) => { s.month.activationLog.push(newActivation(toIso(new Date()))); }, 'log');
+        const dates = root.querySelectorAll<HTMLInputElement>('#calc-log input[type="date"]');
+        dates[dates.length - 1]?.focus();
+      } else if (a === 'remove-activation' && id) {
+        update((s) => { s.month.activationLog = s.month.activationLog.filter((x) => x.id !== id); }, 'log');
       } else if (a === 'see-result') {
         root.querySelector('#calc-results-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } else if (a === 'save-scenario') {
@@ -197,18 +394,6 @@ export const calculatorView: View = {
         toast(t('calc.saved'));
       }
     });
-    root.addEventListener('input', (e) => {
-      const el = e.target as HTMLInputElement;
-      const key = el.dataset.week;
-      if (!key) return;
-      const v = Math.max(0, Number(el.value) || 0);
-      if (key === 'personal') week.personal = v;
-      else {
-        const [i, k] = key.split('.');
-        week.directs[Number(i)][k as 'production' | 'dab' | 'mab'] = v;
-      }
-      root.querySelector('#week-result')!.innerHTML = weeklyResult();
-    });
   },
   update(root, changed) {
     if (changed === 'scenarios') return;
@@ -219,7 +404,27 @@ export const calculatorView: View = {
       res.innerHTML = resultsPanel();
       res.querySelectorAll('details').forEach((d, i) => { if (open[i]) d.open = true; });
     }
-    refreshCapped(root);
+    const m = getState().month;
+    if (changed === 'log' || changed.startsWith('month.activationLog')) {
+      // Re-render the list; selects and dates only fire on change, so put focus back where it was.
+      const path = (document.activeElement as HTMLElement | null)?.dataset?.path;
+      const log = root.querySelector('#calc-log');
+      if (log) log.innerHTML = logSection();
+      if (path) root.querySelector<HTMLElement>(`[data-path="${path}"]`)?.focus();
+    }
+    // Steppers: update the totals in place, so typing in a number box isn't interrupted.
+    const paying = root.querySelector('[data-total="paying"]');
+    if (paying) paying.textContent = `${money(recurringVolume(m.personalPayingMembers, PLAN_PRICES))} ${t('common.perMonth')}`;
+    HISTORY_ROWS.forEach((k) => {
+      const cell = root.querySelector(`[data-total="${k}"]`);
+      if (cell) cell.textContent = money(activationVolume(m.history[k], PLAN_PRICES));
+    });
+    const qbi = root.querySelector('[data-total="qbi"]');
+    if (qbi) qbi.textContent = `${m.history.qbiNew > 0 ? Math.round(Math.min(1, m.history.qbiPaying / m.history.qbiNew) * 100) : 100}%`;
+    const derived = root.querySelector('#calc-derived');
+    if (derived) derived.innerHTML = derivedStrip();
+    // Your volumes change your rank, and with it the per-team limit flags.
+    if (changed === 'team' || !root.querySelector('#calc-team')?.contains(document.activeElement)) renderTeam(root);
     const mini = root.querySelector('#calc-mini');
     if (mini) mini.innerHTML = miniBar();
   },

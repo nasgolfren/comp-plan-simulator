@@ -39,6 +39,62 @@ export interface MonthInput {
   legs: Leg[];
 }
 
+/**
+ * One Partner in your organization, with the Partners they sponsored below them.
+ * Ranks aren't entered: they're computed from each Partner's own subtree.
+ */
+export interface PartnerNode {
+  id: string;
+  name: string;
+  /** This Partner's own activations this month. */
+  activations: PlanCounts;
+  /** This Partner's direct Members who pay their monthly membership. */
+  payingMembers: PlanCounts;
+  /** Optional: activation volume of people below this Partner who aren't listed one by one. */
+  restActivationVolume: number;
+  /** Optional: monthly payments of people below this Partner who aren't listed one by one. */
+  restRecurringVolume: number;
+  children: PartnerNode[];
+}
+
+export type ActivationKind = 'new' | 'upgrade' | 'reactivation';
+
+/** One activation you made personally this month. */
+export interface ActivationEntry {
+  id: string;
+  /** ISO date (yyyy-mm-dd). */
+  date: string;
+  plan: MemberPlan;
+  /** Only first-ever activations ("new") count toward Builders Base Volume. */
+  kind: ActivationKind;
+}
+
+/** Your earlier activity, as plain numbers: enough for the Minimum Activations windows and QBI. */
+export interface ActivityHistory {
+  /** Your activations 1–2 months ago (with this month: the 90-day window). */
+  months1to2: PlanCounts;
+  /** 3–5 months ago (completes the 180-day window). */
+  months3to5: PlanCounts;
+  /** 6–11 months ago (completes the 365-day window). */
+  months6to11: PlanCounts;
+  /** New Classic and Premium members your Builders Base activated in the last 3 months… */
+  qbiNew: number;
+  /** …and how many of them are still paying. */
+  qbiPaying: number;
+}
+
+/**
+ * Structure as the user enters it. Everything the monthly calculation needs beyond this
+ * (activation counts, first-ever share, QBI, Weekly Matching weeks, Minimum Activations)
+ * is derived from it — see toMonthInput.
+ */
+export interface BusinessMonth {
+  activationLog: ActivationEntry[];
+  personalPayingMembers: PlanCounts;
+  history: ActivityHistory;
+  team: PartnerNode[];
+}
+
 export interface CalcProfile {
   isMember: boolean;
   isPartner: boolean;

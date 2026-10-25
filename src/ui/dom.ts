@@ -28,6 +28,9 @@ const paths: Record<string, string> = {
   save: '<path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   minus: '<path d="M5 12h14"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  tree: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="2" y="16" width="6" height="5" rx="1"/><rect x="16" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M5 16v-4h14v4"/>',
+  userPlus: '<circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>',
 };
 
 export function icon(name: keyof typeof paths | string, size = 18, cls = ''): string {
@@ -53,6 +56,8 @@ export function openSheet(opts: {
   actions: { label: string; value: string; kind?: 'primary' | 'danger' | 'plain' }[];
   dismissible?: boolean;
   labelledBy?: string;
+  /** Called with the chosen action while the dialog is still open, e.g. to read form fields. */
+  onAction?: (value: string, dialog: HTMLDialogElement) => void;
 }): Promise<string | null> {
   return new Promise((resolve) => {
     const d = document.createElement('dialog');
@@ -70,7 +75,7 @@ export function openSheet(opts: {
       </div>`;
     document.body.appendChild(d);
     const dismissible = opts.dismissible !== false;
-    const finish = (v: string | null) => { d.close(); d.remove(); resolve(v); };
+    const finish = (v: string | null) => { if (v !== null) opts.onAction?.(v, d); d.close(); d.remove(); resolve(v); };
     d.addEventListener('cancel', (e) => { if (!dismissible) e.preventDefault(); else finish(null); });
     d.addEventListener('click', (e) => {
       if (e.target === d && dismissible) finish(null); // click on the backdrop

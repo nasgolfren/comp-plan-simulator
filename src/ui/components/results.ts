@@ -1,10 +1,11 @@
-import { PLAN_PRICES, rankById } from '../../config/plan.ts';
+import { MEMBERSHIP_FREE, PLAN_PRICES, rankById } from '../../config/plan.ts';
 import type { RankId } from '../../config/plan.ts';
 import { INCOME_KEYS } from '../../engine/types.ts';
 import type { IncomeKey, MonthResult, Note } from '../../engine/types.ts';
 import { money, noteText, t } from '../../i18n/index.ts';
 import { calcMonth } from '../../engine/calc.ts';
 import { simulate } from '../../engine/simulate.ts';
+import { toMonthInput } from '../../engine/team.ts';
 import { calcProfile, getState, simOptions } from '../../state/store.ts';
 import { esc, icon } from '../dom.ts';
 
@@ -15,7 +16,7 @@ export const rankName = (id: RankId, short = false): string =>
 
 export function currentMonth(): MonthResult {
   const s = getState();
-  return calcMonth(s.month, calcProfile(s), PLAN_PRICES);
+  return calcMonth(toMonthInput(s.month, PLAN_PRICES), calcProfile(s), PLAN_PRICES);
 }
 
 export function currentSim() {
@@ -43,6 +44,26 @@ export function incomeLines(r: MonthResult, openFirst = false): string {
     </details>`).join('')}
   </div>`;
 }
+
+/**
+ * Membership Free, always shown: highlighted when this month's direct production qualifies,
+ * greyed out with what's missing when it doesn't.
+ */
+export function membershipFreeBox(r: MonthResult): string {
+  const p = getState().profile;
+  const min = MEMBERSHIP_FREE.directProductionMin;
+  const points = p.isMember && p.memberPlan === 'starter' ? MEMBERSHIP_FREE.starterRewardPoints : MEMBERSHIP_FREE.rewardPoints;
+  const met = r.conditions.membershipFree;
+  const detail = met
+    ? p.isMember ? t('mf.metMember', { waiver: money(r.costs.membershipWaiver), points }) : t('mf.metPartner', { points })
+    : t('mf.notMet', { min: money(min), have: money(r.production.directProduction), missing: money(min - r.production.directProduction) });
+  return `<div class="mf-box ${met ? 'is-met' : ''}">
+    <span class="mf-icon" aria-hidden="true">${icon(met ? 'check' : 'minus', 16)}</span>
+    <div class="min-w-0"><p class="font-semibold">${esc(t('mf.title'))}</p><p class="text-sm">${esc(detail)}</p></div>
+  </div>`;
+}
+
+export const isMembershipFreeNote = (n: Note) => n.key.startsWith('note.membershipFree');
 
 export function costsAndNet(r: MonthResult): string {
   const row = (label: string, v: string, cls = '') => `<div class="flex justify-between gap-4 py-1.5 ${cls}"><span>${esc(label)}</span><span class="num">${v}</span></div>`;

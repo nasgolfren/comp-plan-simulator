@@ -30,7 +30,8 @@ Interpretations where the guide is not explicit:
 
 - Your own (personal) production counts in full toward Qualified Production; the per-team cap applies to each direct Partner team.
 - Qualified Production = activation production + monthly membership payments.
-- Weekly Matching in the monthly view is estimated from an even weekly pace (or a share of weeks you set); the one-week checker uses the exact rule.
+- Weekly Matching is checked week by week (Monday–Sunday) from your dated activations. Your direct Partners' activations have no dates, so their production is spread evenly over the month (a simulation estimate).
+- First-ever share, QBI and the 90/180/365-day Minimum Activations windows are worked out from the dated activations and the "Earlier activity" numbers (months count as 30 days).
 - Ranks sharing one QP level (Ambassador/Premier, Global/Royal) are told apart by Total Activation Volume.
 - The guide doesn't list the Starter activation ($50) or Classic monthly ($100) prices; those come from inCruises plan materials. Prices are fixed in the config; users can't edit them.
 - An SMD+ leader with exactly $600 Total Activation Volume gets 50% TLB (the guide only covers "more than" and "less than" $600).

@@ -3,12 +3,14 @@ import { estimatedRewardPoints, getState } from '../state/store.ts';
 import { esc, icon } from './dom.ts';
 import { disclaimerButton } from './components/disclaimer.ts';
 import { flag } from './flags.ts';
+import { currentMonth } from './components/results.ts';
+import { rankById } from '../config/plan.ts';
 
 export type Route = 'welcome' | 'dashboard' | 'calculator' | 'simulation' | 'goals' | 'scenarios' | 'profile';
 
 export const NAV: { route: Route; icon: string }[] = [
   { route: 'dashboard', icon: 'dashboard' },
-  { route: 'calculator', icon: 'calculator' },
+  { route: 'calculator', icon: 'tree' },
   { route: 'simulation', icon: 'chart' },
   { route: 'goals', icon: 'target' },
   { route: 'scenarios', icon: 'layers' },
@@ -43,11 +45,12 @@ export function shell(): string {
         <div class="flex items-center gap-2 px-4 sm:px-6 lg:px-8 h-14">
           <a href="#/dashboard" class="lg:hidden flex items-center gap-2 min-w-0">${mark}<span class="hidden sm:inline font-display font-bold text-sm truncate">${esc(t('app.name'))}</span></a>
           <div class="ml-auto flex items-center gap-1.5 sm:gap-2">
-            ${topPoints()}
+            ${topBadges()}
             ${disclaimerButton()}
             <div class="seg !p-0.5" role="group" aria-label="${esc(t('top.language'))}">
               ${(['en', 'es'] as const).map((l) => `<button type="button" class="!min-h-7 !px-2 !text-xs" data-set-lang="${l}" aria-pressed="${s.lang === l}" lang="${l}">${flag(l)}${l.toUpperCase()}</button>`).join('')}
-            </div>            <a href="#/profile" class="btn btn-ghost icon-btn !min-h-9 !w-9 lg:hidden" data-route="profile" aria-label="${esc(t('nav.profile'))}">${icon('user', 18)}</a>
+            </div>
+            <a href="#/profile" class="btn btn-ghost icon-btn !min-h-9 !w-9 lg:hidden" data-route="profile" aria-label="${esc(t('nav.profile'))}">${icon('user', 18)}</a>
           </div>
         </div>
       </header>
@@ -62,15 +65,22 @@ export function shell(): string {
 }
 
 /**
- * Estimated Reward Points in the top bar, followed by a vertical divider before the disclaimer.
- * Empty when there's no estimate (not a Member, or no Member-since date).
+ * Status badges in the top bar, followed by a vertical divider before the disclaimer:
+ * this month's rank, Membership Free (only when they're reached) and the estimated Reward Points.
  */
-export function topPoints(): string {
+export function topBadges(): string {
+  const r = currentMonth();
+  const rank = r.qpRank === 'none' ? 'none' : r.paidRank;
   const est = estimatedRewardPoints();
-  if (!est) return '<span id="top-rp" hidden></span>';
-  return `<span id="top-rp" class="flex items-center gap-1.5 sm:gap-2">
-    <a href="#/profile" class="top-rp" title="${esc(t('rp.title'))}" aria-label="${esc(t('rp.title'))}: ${esc(num(est.points))} RP">
-      ${icon('globe', 16)}<span class="num">≈ ${esc(num(est.points))}</span><span class="text-ink-2 font-semibold">RP</span></a>
+  const badges = [
+    rank !== 'none' ? `<a href="#/calculator" class="top-badge rank" title="${esc(t('calc.rank'))}: ${esc(rankById(rank).name)}">${icon('chart', 14)}<span>${esc(rankById(rank).short)}</span></a>` : '',
+    r.conditions.membershipFree ? `<a href="#/calculator" class="top-badge free" title="${esc(t('mf.title'))}" aria-label="${esc(t('mf.title'))}">${icon('check', 14)}<span class="hidden sm:inline">${esc(t('mf.short'))}</span></a>` : '',
+    est ? `<a href="#/profile" class="top-rp" title="${esc(t('rp.title'))}" aria-label="${esc(t('rp.title'))}: ${esc(num(est.points))} RP">
+      ${icon('globe', 16)}<span class="num">≈ ${esc(num(est.points))}</span><span class="text-ink-2 font-semibold">RP</span></a>` : '',
+  ].filter(Boolean);
+  if (!badges.length) return '<span id="top-badges" hidden></span>';
+  return `<span id="top-badges" class="flex items-center gap-1.5 sm:gap-2">
+    ${badges.join('')}
     <span class="top-divider" aria-hidden="true"></span>
   </span>`;
 }

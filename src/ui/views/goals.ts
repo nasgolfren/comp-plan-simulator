@@ -1,6 +1,7 @@
 import { MEMBER_PLANS, PLAN_PRICES, RANKS, rankById } from '../../config/plan.ts';
 import { legActivationVolume, rankGap } from '../../engine/calc.ts';
 import { planGoal } from '../../engine/simulate.ts';
+import { teamToLegs } from '../../engine/team.ts';
 import type { Goal } from '../../engine/simulate.ts';
 import { money, monthLabel, num, t } from '../../i18n/index.ts';
 import { calcProfile, getState, simOptions, update } from '../../state/store.ts';
@@ -38,7 +39,7 @@ function requirements(): string {
   const r = rankById(s.goal.rank);
   const prices = PLAN_PRICES;
   const month = currentMonth();
-  const legs = s.month.legs.map((l) => ({ id: l.id, value: legActivationVolume(l, prices) + l.recurringVolume }));
+  const legs = teamToLegs(s.month.team, prices).map((l) => ({ id: l.id, value: legActivationVolume(l, prices) + l.recurringVolume }));
   const gap = rankGap(r.id, month.production.directProduction, legs, month.production.tav);
   const row = (label: string, need: string, have: string, missing: string) =>
     `<tr><td>${esc(label)}</td><td class="font-semibold">${need}</td><td>${have}</td><td class="${missing === '—' ? 'text-good' : 'text-accent-ink font-semibold'}">${missing}</td></tr>`;

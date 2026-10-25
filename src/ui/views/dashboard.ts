@@ -35,7 +35,8 @@ function body(): string {
   const s = getState();
   const r = currentMonth();
   const sim = currentSim().slice(0, 12);
-  const hasInput = r.production.directProduction > 0 || s.month.legs.length > 0;
+  // The getting-started note stays until real numbers are entered (an empty team row doesn't count).
+  const hasInput = r.production.directProduction > 0 || r.production.tav > 0 || r.production.rqp > 0;
   const cur = r.qpRank === 'none' ? 'none' : r.paidRank;
   const nextRankId = r.nextRank?.rankId ?? null;
   const days = renewalDaysLeft(s);
@@ -52,7 +53,7 @@ function body(): string {
       <h1>${esc(t('dash.title'))}</h1>
       <p class="text-ink-2 mt-1">${esc(t('dash.subtitle'))}</p>
     </div>
-    <a href="#/calculator" class="btn btn-primary">${icon('calculator', 16)}${esc(t('dash.openCalc'))}</a>
+    <a href="#/calculator" class="btn btn-primary">${icon('tree', 16)}${esc(t('dash.openCalc'))}</a>
   </header>
 
   ${!hasInput ? `<div class="note note-info mb-4">${icon('info', 16)}<span>${esc(t('dash.empty'))}</span></div>` : ''}
