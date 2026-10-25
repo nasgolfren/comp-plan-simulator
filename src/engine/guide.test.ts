@@ -76,6 +76,14 @@ test('TLB: MD under $600 TAV keeps title, no TLB; SMD+ under $600 drops to MD', 
   assert.equal(d.tlb, 0);
 });
 
+test('TLB: SMD+ with exactly $600 TAV gets 50%, never less than an MD with the same TAV', () => {
+  const d = decideRank(12_000, [], 600);
+  assert.equal(d.paidRank, 'smd');
+  assert.equal(d.tlbStatus, 'partial');
+  assert.equal(d.tlb, 500);
+  assert.equal(decideRank(3_000, [], 600).tlb, 300);
+});
+
 test('RQP example: $1,000 direct + teams 5,000 / 4,000 / 700 → $4,100 RQP → $205', () => {
   const { rqp } = recurringQualifiedProduction(1_000, [5_000, 4_000, 700]);
   assert.equal(rqp, 4_100);

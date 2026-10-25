@@ -1,24 +1,20 @@
-import { KNOWN_PRICES, MEMBER_PLANS, PARTNER_RENEWAL } from '../config/plan.ts';
+import { MEMBERSHIP_POINTS, PARTNER_RENEWAL, PLAN_PRICES } from '../config/plan.ts';
 import type { MemberPlan, RankId } from '../config/plan.ts';
 import { DEFAULT_ASSUMPTIONS } from '../engine/simulate.ts';
 import type { SimAssumptions, SimOptions } from '../engine/simulate.ts';
-import type { CalcProfile, Leg, MonthInput, PlanCounts, Prices } from '../engine/types.ts';
+import type { CalcProfile, Leg, MonthInput, PlanCounts } from '../engine/types.ts';
 
 export type Lang = 'en' | 'es';
-export type Theme = 'system' | 'light' | 'dark';
 
 export interface Profile {
   isMember: boolean;
   isPartner: boolean;
   memberPlan: MemberPlan;
-  /** ISO date (yyyy-mm-dd) the Partnership was activated. */
+  /** ISO date (yyyy-mm-dd) the Partnership was activated. Renewals fall every 6 months from it. */
   partnerSince: string;
-  /** ISO date of the last $95 Partner renewal payment. */
-  lastRenewal: string;
-  tlbMonths: number;
+  /** ISO date the paid membership started. Used to estimate Reward Points. */
+  memberSince: string;
 }
-
-export type NullablePrices = Record<'activation' | 'monthly', Record<MemberPlan, number | null>>;
 
 export interface GoalState { kind: 'rank' | 'income'; rank: RankId; net: number; deadline: number }
 
@@ -33,10 +29,10 @@ export interface Scenario {
 export interface AppState {
   version: 1;
   lang: Lang;
-  theme: Theme;
   disclaimerAccepted: boolean;
+  /** The welcome profile setup has been completed once. */
+  onboarded: boolean;
   profile: Profile;
-  prices: NullablePrices;
   month: MonthInput;
   sim: SimAssumptions;
   goal: GoalState;
@@ -59,13 +55,10 @@ export function defaultState(): AppState {
   return {
     version: 1,
     lang: navigator.language?.toLowerCase().startsWith('es') ? 'es' : 'en',
-    theme: 'system',
     disclaimerAccepted: false,
-    profile: { isMember: true, isPartner: true, memberPlan: 'classic', partnerSince: '', lastRenewal: '', tlbMonths: 0 },
-    prices: {
-      activation: { starter: KNOWN_PRICES.starter.activation, classic: KNOWN_PRICES.classic.activation, premium: KNOWN_PRICES.premium.activation },
-      monthly: { starter: KNOWN_PRICES.starter.monthly, classic: KNOWN_PRICES.classic.monthly, premium: KNOWN_PRICES.premium.monthly },
-    },
+    onboarded: false,
+    // Nothing is chosen until the welcome setup; memberPlan only counts once isMember is on.
+    profile: { isMember: false, isPartner: false, memberPlan: 'classic', partnerSince: '', memberSince: '' },
     month: {
       personalActivations: zero(),
       personalPayingMembers: zero(),
@@ -97,10 +90,20 @@ function merge<T>(base: T, saved: unknown): T {
   return (saved === undefined ? base : saved) as T;
 }
 
+/** Remove fields older versions saved that no longer exist (editable prices, TLB month count, theme). */
+function dropRemoved(s: AppState): AppState {
+  const loose = s as unknown as Record<string, unknown>;
+  delete loose.prices;
+  delete loose.theme;
+  delete (s.profile as unknown as Record<string, unknown>).tlbMonths;
+  delete (s.profile as unknown as Record<string, unknown>).lastRenewal;
+  return s;
+}
+
 function load(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return merge(defaultState(), JSON.parse(raw));
+    if (raw) return dropRemoved(merge(defaultState(), JSON.parse(raw)));
   } catch { /* storage blocked or corrupt — start fresh */ }
   return defaultState();
 }
@@ -145,31 +148,18 @@ export function getPath(path: string): unknown {
 }
 
 export function replaceState(next: AppState): void {
-  state = merge(defaultState(), next);
+  state = dropRemoved(merge(defaultState(), next));
   emit('*');
 }
 
 export function resetAll(): void {
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
-  const keep = { lang: state.lang, theme: state.theme };
+  const keep = { lang: state.lang };
   state = { ...defaultState(), ...keep, disclaimerAccepted: true };
   emit('*');
 }
 
 // ---------- Derived values ----------
-
-export function missingPrices(s: AppState = state): string[] {
-  const out: string[] = [];
-  for (const kind of ['activation', 'monthly'] as const) {
-    for (const p of MEMBER_PLANS) if (s.prices[kind][p] === null || Number.isNaN(s.prices[kind][p])) out.push(`${kind}.${p}`);
-  }
-  return out;
-}
-
-export function resolvedPrices(s: AppState = state): Prices {
-  const fill = (r: Record<MemberPlan, number | null>) => ({ starter: r.starter ?? 0, classic: r.classic ?? 0, premium: r.premium ?? 0 });
-  return { activation: fill(s.prices.activation), monthly: fill(s.prices.monthly) };
-}
 
 const parseDate = (iso: string): Date | null => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
@@ -177,12 +167,41 @@ const parseDate = (iso: string): Date | null => {
   return new Date(y, m - 1, d);
 };
 
-/** Days until the Partner renewal expires (negative = expired), or null if unknown. */
+const addMonths = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth() + n, d.getDate());
+
+/** Whole months from `from` to `to` (0 until the first monthly anniversary). */
+function fullMonths(from: Date, to: Date): number {
+  let n = (to.getFullYear() - from.getFullYear()) * 12 + to.getMonth() - from.getMonth();
+  if (to.getDate() < from.getDate()) n -= 1;
+  return Math.max(0, n);
+}
+
+/**
+ * Days until the next $95 Partner renewal is due, or null without a Partner-since date.
+ * Assumes every renewal so far was paid on time, every 6 months from the activation date.
+ */
 export function renewalDaysLeft(s: AppState = state, today = new Date()): number | null {
-  const d = parseDate(s.profile.lastRenewal);
+  const d = parseDate(s.profile.partnerSince);
   if (!d) return null;
-  const expires = new Date(d.getFullYear(), d.getMonth() + PARTNER_RENEWAL.months, d.getDate());
-  return Math.ceil((expires.getTime() - today.getTime()) / 86_400_000);
+  const cycles = Math.floor(fullMonths(d, today) / PARTNER_RENEWAL.months) + 1;
+  const due = addMonths(d, cycles * PARTNER_RENEWAL.months);
+  return Math.ceil((due.getTime() - today.getTime()) / 86_400_000);
+}
+
+export interface PointsEstimate { points: number; months: number; first: number; perMonth: number }
+
+/**
+ * Rough Reward Points collected from the membership: the first-payment points plus the monthly
+ * points for every monthly payment since. Points already used and other awards aren't counted.
+ */
+export function estimatedRewardPoints(s: AppState = state, today = new Date()): PointsEstimate | null {
+  const d = parseDate(s.profile.memberSince);
+  if (!s.profile.isMember || !d || d > today) return null;
+  const plan = s.profile.memberPlan;
+  const months = fullMonths(d, today);
+  const first = MEMBERSHIP_POINTS[plan].firstPayment;
+  const perMonth = PLAN_PRICES.monthly[plan] * MEMBERSHIP_POINTS[plan].perMonthlyDollar;
+  return { points: first + months * perMonth, months, first, perMonth };
 }
 
 /** The first full calendar month after activation is the Fast Start month. */
@@ -225,10 +244,10 @@ export function importJson(text: string): void {
 const toBase64Url = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromBase64Url = (s: string) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)));
 
-export interface SharePayload { name: string; month: MonthInput; sim: SimAssumptions; prices: NullablePrices }
+export interface SharePayload { name: string; month: MonthInput; sim: SimAssumptions }
 
 export function shareLink(name: string, month: MonthInput, sim: SimAssumptions): string {
-  const payload: SharePayload = { name, month, sim, prices: state.prices };
+  const payload: SharePayload = { name, month, sim };
   const url = new URL(location.href);
   url.hash = `#/share/${toBase64Url(JSON.stringify(payload))}`;
   return url.toString();

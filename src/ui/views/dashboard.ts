@@ -1,7 +1,7 @@
-import { ELITE_TRAVEL, rankById, rankIndex } from '../../config/plan.ts';
+import { rankById } from '../../config/plan.ts';
 import { INCOME_KEYS } from '../../engine/types.ts';
 import { money, monthLabel, t } from '../../i18n/index.ts';
-import { getState, missingPrices, renewalDaysLeft } from '../../state/store.ts';
+import { getState, renewalDaysLeft } from '../../state/store.ts';
 import { esc, icon } from '../dom.ts';
 import { legend, mountChart } from '../components/charts.ts';
 import { footnote } from '../components/disclaimer.ts';
@@ -39,16 +39,12 @@ function body(): string {
   const cur = r.qpRank === 'none' ? 'none' : r.paidRank;
   const nextRankId = r.nextRank?.rankId ?? null;
   const days = renewalDaysLeft(s);
-  const missing = missingPrices(s);
-  const curIdx = rankIndex(cur);
 
   const renewalText = days === null ? t('renewal.unknown') : days >= 0 ? t('renewal.daysLeft', { days }) : t('renewal.expired', { days: -days });
   const renewalTone = days === null ? 'text-muted' : days < 0 ? 'text-bad' : days < 21 ? 'text-warn' : 'text-ink';
 
   const gap = r.nextRank;
   const capped = gap?.cappedLegIds.length ?? 0;
-
-  const elite = s.profile.tlbMonths >= ELITE_TRAVEL.tlbMonthsRequired && curIdx >= rankIndex('md') && r.conditions.minActivations.met;
 
   return `
   <header class="flex flex-wrap items-end justify-between gap-4 mb-6">
@@ -59,7 +55,6 @@ function body(): string {
     <a href="#/calculator" class="btn btn-primary">${icon('calculator', 16)}${esc(t('dash.openCalc'))}</a>
   </header>
 
-  ${missing.length ? `<div class="note note-warn mb-4">${icon('alert', 16)}<span>${esc(t('dash.missingPrices'))} <a class="underline font-semibold" href="#/profile">${esc(t('dash.setPrices'))}</a></span></div>` : ''}
   ${!hasInput ? `<div class="note note-info mb-4">${icon('info', 16)}<span>${esc(t('dash.empty'))}</span></div>` : ''}
 
   <section class="panel mb-4 pb-3" aria-labelledby="route-h">
@@ -111,9 +106,7 @@ function body(): string {
         ${cond(t('cond.renewal'), !s.profile.isPartner ? 'notMet' : days === null ? 'unknown' : r.conditions.renewalCurrent ? 'met' : 'notMet')}
         ${cond(t('cond.minActivations'), !r.conditions.minActivations.required ? 'notRequired' : r.conditions.minActivations.met ? 'met' : 'notMet')}
         ${cond(t('cond.membershipFree'), r.conditions.membershipFree ? 'met' : 'notMet')}
-        ${cond(t('cond.fastStart'), r.conditions.fastStart ? 'met' : 'notThisMonth')}
-        ${cond(t('cond.elite'), elite ? 'met' : 'notMet')}
-      </ul>
+        ${cond(t('cond.fastStart'), r.conditions.fastStart ? 'met' : 'notThisMonth')}      </ul>
     </section>
   </div>
 

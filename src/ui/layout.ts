@@ -1,9 +1,10 @@
-import { t } from '../i18n/index.ts';
-import { getState } from '../state/store.ts';
+import { num, t } from '../i18n/index.ts';
+import { estimatedRewardPoints, getState } from '../state/store.ts';
 import { esc, icon } from './dom.ts';
 import { disclaimerButton } from './components/disclaimer.ts';
+import { flag } from './flags.ts';
 
-export type Route = 'dashboard' | 'calculator' | 'simulation' | 'goals' | 'scenarios' | 'profile';
+export type Route = 'welcome' | 'dashboard' | 'calculator' | 'simulation' | 'goals' | 'scenarios' | 'profile';
 
 export const NAV: { route: Route; icon: string }[] = [
   { route: 'dashboard', icon: 'dashboard' },
@@ -19,8 +20,6 @@ const mark = `<svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"
   <path d="M6 19c3 0 3-4 6.5-4s3.5 4 7 4 3-3 6.5-3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
   <circle cx="22.5" cy="10.5" r="2.6" fill="var(--accent)"/>
 </svg>`;
-
-const themeIcon = { system: 'monitor', light: 'sun', dark: 'moon' } as const;
 
 export function shell(): string {
   const s = getState();
@@ -44,22 +43,49 @@ export function shell(): string {
         <div class="flex items-center gap-2 px-4 sm:px-6 lg:px-8 h-14">
           <a href="#/dashboard" class="lg:hidden flex items-center gap-2 min-w-0">${mark}<span class="hidden sm:inline font-display font-bold text-sm truncate">${esc(t('app.name'))}</span></a>
           <div class="ml-auto flex items-center gap-1.5 sm:gap-2">
+            ${topPoints()}
             ${disclaimerButton()}
             <div class="seg !p-0.5" role="group" aria-label="${esc(t('top.language'))}">
-              ${(['en', 'es'] as const).map((l) => `<button type="button" class="!min-h-7 !px-2 !text-xs" data-set-lang="${l}" aria-pressed="${s.lang === l}" lang="${l}">${l.toUpperCase()}</button>`).join('')}
-            </div>
-            <button type="button" class="btn btn-ghost icon-btn !min-h-9 !w-9" data-cycle-theme aria-label="${esc(t('top.theme'))}: ${esc(t(`theme.${s.theme}`))}" title="${esc(t('top.theme'))}: ${esc(t(`theme.${s.theme}`))}">${icon(themeIcon[s.theme], 18)}</button>
-            <a href="#/profile" class="btn btn-ghost icon-btn !min-h-9 !w-9 lg:hidden" data-route="profile" aria-label="${esc(t('nav.profile'))}">${icon('user', 18)}</a>
+              ${(['en', 'es'] as const).map((l) => `<button type="button" class="!min-h-7 !px-2 !text-xs" data-set-lang="${l}" aria-pressed="${s.lang === l}" lang="${l}">${flag(l)}${l.toUpperCase()}</button>`).join('')}
+            </div>            <a href="#/profile" class="btn btn-ghost icon-btn !min-h-9 !w-9 lg:hidden" data-route="profile" aria-label="${esc(t('nav.profile'))}">${icon('user', 18)}</a>
           </div>
         </div>
       </header>
-      <main id="main" tabindex="-1" class="flex-1 w-full max-w-[1320px] px-4 sm:px-6 lg:px-8 pt-6 pb-28 lg:pb-12 outline-none"></main>
+      <main id="main" tabindex="-1" class="flex-1 w-full max-w-[1320px] mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-28 lg:pb-12 outline-none"></main>
       <footer class="lg:hidden px-4 pb-24 -mt-20 text-[0.72rem] text-muted">${esc(t('footer.unofficial'))}</footer>
     </div>
 
     <nav aria-label="${esc(t('nav.main'))}" class="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-surface border-t border-line flex" style="padding-bottom:env(safe-area-inset-bottom)">
       ${NAV.map((n) => `<a class="tab-link" data-route="${n.route}" href="#/${n.route}">${icon(n.icon, 21)}<span>${esc(t(`nav.${n.route}`))}</span></a>`).join('')}
     </nav>
+  </div>`;
+}
+
+/**
+ * Estimated Reward Points in the top bar, followed by a vertical divider before the disclaimer.
+ * Empty when there's no estimate (not a Member, or no Member-since date).
+ */
+export function topPoints(): string {
+  const est = estimatedRewardPoints();
+  if (!est) return '<span id="top-rp" hidden></span>';
+  return `<span id="top-rp" class="flex items-center gap-1.5 sm:gap-2">
+    <a href="#/profile" class="top-rp" title="${esc(t('rp.title'))}" aria-label="${esc(t('rp.title'))}: ${esc(num(est.points))} RP">
+      ${icon('globe', 16)}<span class="num">≈ ${esc(num(est.points))}</span><span class="text-ink-2 font-semibold">RP</span></a>
+    <span class="top-divider" aria-hidden="true"></span>
+  </span>`;
+}
+
+/** The welcome setup fills the whole page: no navigation, only the language switch. */
+export function welcomeShell(): string {
+  const s = getState();
+  return `
+  <div class="welcome-screen">
+    <div class="flex justify-end max-w-[1120px] mx-auto">
+      <div class="seg !p-0.5" role="group" aria-label="${esc(t('top.language'))}">
+        ${(['en', 'es'] as const).map((l) => `<button type="button" class="!min-h-7 !px-2 !text-xs" data-set-lang="${l}" aria-pressed="${s.lang === l}" lang="${l}">${flag(l)}${l.toUpperCase()}</button>`).join('')}
+      </div>
+    </div>
+    <main id="main" tabindex="-1" class="pt-6 sm:pt-10 outline-none"></main>
   </div>`;
 }
 

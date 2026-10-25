@@ -1,21 +1,27 @@
 /**
  * Compensation plan rules, transcribed from the
- * "Income and Incentive Guide" (REF: JAN 7, 2026-214EN-KP).
+ * "Income and Incentive Guide" (REF: JAN 7, 2026-214EN-KP) and checked against the
+ * "Income and Incentive Overview" (REF: JAN 4, 2026-109EN-KP). "Guide p. N" below
+ * points to the page of the Guide each rule comes from.
  *
  * Every rate, threshold and table used by the engine lives here, so a plan
  * update means editing this one file. All amounts are USD.
  */
 
-export const PLAN_VERSION = 'Income and Incentive Guide, REF: JAN 7, 2026-214EN-KP';
+export const PLAN_VERSION = 'Income and Incentive Guide, REF: 214EN_INCOME_AND_INCENTIVE_GUIDE.pdf';
+export const PLAN_OVERVIEW_VERSION = 'Income and Incentive Overview, REF: 109EN_INCOME_AND_INCENTIVE_OVERVIEW.pdf';
 export const DISCLOSURE_URL = 'https://www.incruises.com/disclosure';
 
 export type MemberPlan = 'starter' | 'classic' | 'premium';
 export const MEMBER_PLANS: MemberPlan[] = ['starter', 'classic', 'premium'];
 
-/** Daily Activation Bonus per direct activation. */
+/** Daily Activation Bonus per direct activation. Guide p. 4. */
 export const DAB: Record<MemberPlan, number> = { starter: 20, classic: 20, premium: 50 };
 
-/** Monthly Activations Bonus: per-activation amount by monthly count of that plan. Starter earns no MAB. */
+/**
+ * Monthly Activations Bonus: per-activation amount by monthly count of that plan. Starter earns no MAB.
+ * Guide p. 5. Counted per plan ("of a specific plan"), as the Guide's 3 Classic + 3 Premium example confirms.
+ */
 export const MAB_TIERS: Record<'classic' | 'premium', { min: number; amount: number }[]> = {
   classic: [
     { min: 10, amount: 40 },
@@ -29,19 +35,36 @@ export const MAB_TIERS: Record<'classic' | 'premium', { min: number; amount: num
   ],
 };
 
-/** Plan prices known from the guide. Missing values are set by each user in Settings. */
-export const KNOWN_PRICES: Record<MemberPlan, { activation: number | null; monthly: number | null }> = {
-  starter: { activation: null, monthly: 50 },
-  classic: { activation: 200, monthly: null },
-  premium: { activation: 500, monthly: 250 },
+/**
+ * Plan prices: the first payment (activation production) and the monthly payment. From the guide
+ * (pp. 5–6, 13), except Starter activation ($50) and Classic monthly ($100), which the guide doesn't
+ * list and come from inCruises plan materials. Fixed facts: users can't change them.
+ */
+export const PLAN_PRICES: Record<'activation' | 'monthly', Record<MemberPlan, number>> = {
+  activation: { starter: 50, classic: 200, premium: 500 },
+  monthly: { starter: 50, classic: 100, premium: 250 },
 };
 
+/**
+ * Reward Points a Member receives with the membership (from inCruises plan materials, not the guide):
+ * a fixed amount with the first payment, and each month points per $1 of the monthly payment.
+ */
+export const MEMBERSHIP_POINTS: Record<MemberPlan, { firstPayment: number; perMonthlyDollar: number }> = {
+  starter: { firstPayment: 50, perMonthlyDollar: 1 },
+  classic: { firstPayment: 350, perMonthlyDollar: 2 },
+  premium: { firstPayment: 800, perMonthlyDollar: 2 },
+};
+
+/** Guide p. 3. */
 export const PARTNER_RENEWAL = { amount: 95, months: 6 };
 
-/** Weekly Matching Bonus qualification (per qualification week). */
+/** Weekly Matching Bonus qualification (per qualification week). Guide pp. 5–6. */
 export const WEEKLY_MATCHING = { personalMin: 200, teamMin: 600, matchRate: 1 };
 
-/** Minimum Activations Requirement for MD and above (BOD ranks exempt). Meeting any one window qualifies. */
+/**
+ * Minimum Activations Requirement for MD and above (BOD ranks exempt). Meeting any one window qualifies.
+ * Guide pp. 3–4 ("direct Activation Production"); the Overview says "direct New Member Activation Production".
+ */
 export const MIN_ACTIVATIONS = [
   { amount: 200, days: 30 },
   { amount: 600, days: 90 },
@@ -62,7 +85,7 @@ export interface Rank {
   tlb: number;       // full Team Leadership Bonus
 }
 
-/** Ordered lowest → highest. */
+/** Ordered lowest → highest. Guide pp. 6–7. */
 export const RANKS: Rank[] = [
   { id: 'none', name: 'Partner', short: '—', qp: 0, legCap: 0.4, tav: 0, tlb: 0 },
   { id: 'md', name: 'Marketing Director', short: 'MD', qp: 3_000, legCap: 0.4, tav: 600, tlb: 300 },
@@ -81,14 +104,19 @@ export const RANKS: Rank[] = [
 export const rankIndex = (id: RankId): number => RANKS.findIndex((r) => r.id === id);
 export const rankById = (id: RankId): Rank => RANKS[rankIndex(id)];
 
-/** Below this TAV a qualified leader keeps only the MD title and earns no TLB. */
+/** Below this TAV a qualified leader keeps only the MD title and earns no TLB. Guide pp. 7–8. */
 export const TLB_TAV_FLOOR = 600;
-/** Share of TLB paid to SMD+ when TAV is above the floor but below the rank requirement. */
+/** Share of TLB paid to SMD+ when TAV reaches the floor but is below the rank requirement. */
 export const TLB_PARTIAL_RATE = 0.5;
 
+/** Guide p. 13. */
 export const FAST_START = { bonus: 500, replacesMdTlb: 300, uplineMatch: 500 };
 
-/** Recurring Qualified Production thresholds → max RQP counted from one Partner leg. Ordered high → low. */
+/**
+ * Recurring Qualified Production thresholds → max RQP counted from one Partner leg. Ordered high → low.
+ * Guide p. 8. The Overview adds that Recurring Income is uncapped for Board of Directors leaders;
+ * neither document states a cap for lower ranks, so none is modelled.
+ */
 export const RQP_THRESHOLDS: { min: number; maxPerLeg: number }[] = [
   { min: 550_000, maxPerLeg: 220_000 },
   { min: 250_000, maxPerLeg: 100_000 },
@@ -100,7 +128,7 @@ export const RQP_THRESHOLDS: { min: number; maxPerLeg: number }[] = [
   { min: 0, maxPerLeg: 1_200 },
 ];
 
-/** Recurring Income per $100 of RQP, by Builders Base Bonus earned. Ordered high → low. */
+/** Recurring Income per $100 of RQP, by Builders Base Bonus earned. Ordered high → low. Guide p. 9. */
 export const RECURRING_MULTIPLIER: { minBbb: number; per100: number }[] = [
   { minBbb: 30_000, per100: 9 },
   { minBbb: 23_000, per100: 8 },
@@ -111,7 +139,7 @@ export const RECURRING_MULTIPLIER: { minBbb: number; per100: number }[] = [
 export const SUPER_BBB_RECURRING_PER100 = 10;
 export const BOD_RECURRING_GUARANTEE = { minBbb: 5_850, minRecurring: 55_000 };
 
-/** Builders Base Bonus: share of the whole month's Builders Base Volume. Ordered high → low. */
+/** Builders Base Bonus: share of the whole month's Builders Base Volume. Ordered high → low. Guide pp. 9–11. */
 export const BBB_TIERS: { minBbv: number; rate: number }[] = [
   { minBbv: 30_000, rate: 0.3 },
   { minBbv: 10_000, rate: 0.1 },
@@ -123,6 +151,41 @@ export const SUPER_BBB = { ownRate: 0.05, idTeamRate: 0.05, idTeamMinRank: 'ed' 
 export const BBB_MAX_LEG_RANK: RankId = 'nd';
 export const QBI_FULL_PAY = 0.65;
 
+/** Guide pp. 12–13. */
 export const MEMBERSHIP_FREE = { directProductionMin: 500, maxWaiver: 100, rewardPoints: 200, starterRewardPoints: 50 };
 
-export const ELITE_TRAVEL = { tlbMonthsRequired: 3, unlimitedBookingsRank: 'nd' as RankId };
+/** Guide p. 13. Regular Members may pay up to 50% of a cruise with Reward Points, one booking at a time. */
+export const ELITE_TRAVEL = { tlbMonthsRequired: 3, unlimitedBookingsRank: 'nd' as RankId, regularPointsShare: 0.5 };
+
+/** Reward Points competitions (non-cash). Guide pp. 14–15. */
+export const REWARD_POINTS_COMPETITIONS = {
+  weekly: { directActivationMin: 400 },
+  monthly: { directActivationMin: 400, teamActivationMin: 1_000, rankCategories: ['none', 'md', 'smd', 'rd', 'nd'] as RankId[] },
+  winnersPerCategory: 25,
+  points: { min: 20, max: 500 },
+};
+
+export type PayoutKey = 'dab' | 'mab' | 'matching' | 'tlb' | 'recurring' | 'bbb' | 'fastStart';
+export type Payout =
+  | { kind: 'within24h' }
+  | { kind: 'weekly'; weekday: 'monday' }
+  | { kind: 'monthly'; day: number; delayedDay?: number };
+
+/**
+ * When each income source is paid. Guide pp. 5–6, 8, 11, 13.
+ * - `within24h`: normally within 24 hours of the activation
+ * - `weekly`: every Monday for the previous Monday 00:00 – Sunday 23:59 UTC week
+ * - `monthly`: on `day` of the month after the production month
+ * Monthly days that fall on a weekend move to the next business day.
+ */
+export const PAYOUT_SCHEDULE: Record<PayoutKey, Payout> = {
+  dab: { kind: 'within24h' },
+  matching: { kind: 'weekly', weekday: 'monday' },
+  mab: { kind: 'monthly', day: 8 },
+  tlb: { kind: 'monthly', day: 10 },
+  fastStart: { kind: 'monthly', day: 10 },
+  recurring: { kind: 'monthly', day: 15 },
+  // Paid on the 14th of the month after that instead when the month's Classic/Premium Builders Base
+  // activations outnumber the New Classic/Premium Members in the QBI period.
+  bbb: { kind: 'monthly', day: 15, delayedDay: 14 },
+};

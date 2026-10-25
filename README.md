@@ -8,7 +8,7 @@ from numbers the user enters. It is a planning and learning tool, not an income 
 - **Simulation** – month-by-month model (6–36 months) with your own growth, churn and team assumptions
 - **Goals** – what a target rank requires, and how much activity the simulation would need to reach a rank or income by a deadline
 - **Scenarios** – save, compare and share (link) setups
-- **Profile & settings** – Member/Partner status, plan prices, renewal date, EN/ES, light/dark theme, export/import/reset
+- **Profile & settings** – Member/Partner status, membership, Partner dates, EN/ES, export/import/reset
 
 All data stays in the browser (`localStorage`). There is no backend and no analytics.
 
@@ -21,7 +21,10 @@ All data stays in the browser (`localStorage`). There is no backend and no analy
 ## Plan rules
 
 All rates, thresholds and tables are in [`src/config/plan.ts`](src/config/plan.ts), transcribed from
-the *Income and Incentive Guide* (REF: JAN 7, 2026-214EN-KP). When the plan changes, edit that file.
+the *Income and Incentive Guide* (REF: JAN 7, 2026-214EN-KP) with page references, and checked against the
+*Income and Incentive Overview* (REF: JAN 4, 2026-109EN-KP). The file also holds the payout calendar and the
+Reward Points competition thresholds. When the plan changes, edit that file. The source PDFs go in `docs/`,
+which is kept out of git.
 
 Interpretations where the guide is not explicit:
 
@@ -29,7 +32,10 @@ Interpretations where the guide is not explicit:
 - Qualified Production = activation production + monthly membership payments.
 - Weekly Matching in the monthly view is estimated from an even weekly pace (or a share of weeks you set); the one-week checker uses the exact rule.
 - Ranks sharing one QP level (Ambassador/Premier, Global/Royal) are told apart by Total Activation Volume.
-- Prices the guide doesn't list (Starter activation, Classic monthly) are set by each user in Settings.
+- The guide doesn't list the Starter activation ($50) or Classic monthly ($100) prices; those come from inCruises plan materials. Prices are fixed in the config; users can't edit them.
+- An SMD+ leader with exactly $600 Total Activation Volume gets 50% TLB (the guide only covers "more than" and "less than" $600).
+- Minimum Activations Requirement follows the Guide (all direct Activation Production); the Overview says "New Member" activations only.
+- The Overview says Recurring Income is uncapped for Board of Directors leaders; no cap is stated for other ranks, so none is modelled.
 
 ## Development
 
@@ -60,5 +66,5 @@ src/
   ui/                 layout, views, charts, disclaimer, form fields
 ```
 
-Chart colors are a categorical palette checked for color-vision-deficiency separation in light and
-dark mode; every chart also has a legend and a table or list of the same numbers.
+Chart colors are a categorical palette checked for color-vision-deficiency separation on the dark
+background; every chart also has a legend and a table or list of the same numbers.

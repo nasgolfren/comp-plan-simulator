@@ -76,7 +76,7 @@ export interface RankDecision {
 /**
  * Rank is set by Qualified Production. Ranks sharing one QP level (Ambassador/Premier,
  * Global/Royal) are told apart by Total Activation Volume. TLB is full when TAV meets the
- * rank requirement, 50% for SMD+ when TAV is above $600, otherwise the leader keeps only
+ * rank requirement, 50% for SMD+ when TAV is at least $600, otherwise the leader keeps only
  * the MD title without TLB.
  */
 export function decideRank(personal: number, legValues: number[], tav: number): RankDecision {
@@ -93,7 +93,7 @@ export function decideRank(personal: number, legValues: number[], tav: number): 
   const qp = qpForRank(rank.id, personal, legValues);
 
   if (fullyMet) return { qpRank: rank.id, paidRank: rank.id, tlbStatus: 'full', tlb: rank.tlb, qp };
-  if (rank.id !== 'md' && tav > TLB_TAV_FLOOR) {
+  if (rank.id !== 'md' && tav >= TLB_TAV_FLOOR) {
     return { qpRank: rank.id, paidRank: rank.id, tlbStatus: 'partial', tlb: rank.tlb * TLB_PARTIAL_RATE, qp };
   }
   return { qpRank: rank.id, paidRank: 'md', tlbStatus: 'none', tlb: 0, qp };

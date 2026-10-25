@@ -1,10 +1,9 @@
 import './style.css';
 import { t } from './i18n/index.ts';
 import { decodeShare, getState, setPath, subscribe, uid, update } from './state/store.ts';
-import type { Theme } from './state/store.ts';
 import { esc, openSheet, toast } from './ui/dom.ts';
 import { readInput } from './ui/fields.ts';
-import { markActive, shell } from './ui/layout.ts';
+import { markActive, shell, topPoints, welcomeShell } from './ui/layout.ts';
 import type { Route } from './ui/layout.ts';
 import { openDisclaimer } from './ui/components/disclaimer.ts';
 import { calculatorView } from './ui/views/calculator.ts';
@@ -13,9 +12,11 @@ import { goalsView } from './ui/views/goals.ts';
 import { profileView } from './ui/views/profile.ts';
 import { scenariosView } from './ui/views/scenarios.ts';
 import { simulationView } from './ui/views/simulation.ts';
+import { welcomeView } from './ui/views/welcome.ts';
 import type { View } from './ui/views/view.ts';
 
 const views: Record<Route, View> = {
+  welcome: welcomeView,
   dashboard: dashboardView,
   calculator: calculatorView,
   simulation: simulationView,
@@ -27,16 +28,6 @@ const views: Record<Route, View> = {
 const app = document.getElementById('app')!;
 let route: Route = 'dashboard';
 let container: HTMLElement | null = null;
-
-// ---------- theme ----------
-const media = window.matchMedia('(prefers-color-scheme: dark)');
-function applyTheme(): void {
-  const pref = getState().theme;
-  const dark = pref === 'dark' || (pref === 'system' && media.matches);
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  document.documentElement.lang = getState().lang;
-}
-media.addEventListener('change', applyTheme);
 
 // ---------- rendering ----------
 function parseRoute(): Route {
@@ -56,14 +47,15 @@ function renderView(): void {
 }
 
 function renderAll(): void {
-  applyTheme();
-  app.innerHTML = shell();
+  document.documentElement.lang = getState().lang;
+  app.innerHTML = route === 'welcome' ? welcomeShell() : shell();
   renderView();
 }
 
 subscribe((_, changed) => {
-  if (changed === '*' || changed === 'lang' || changed === 'theme') { renderAll(); return; }
-  if (changed === 'disclaimerAccepted') return;
+  if (changed === '*' || changed === 'lang') { renderAll(); return; }
+  if (changed === 'disclaimerAccepted' || changed === 'onboarded') return;
+  if (changed.startsWith('profile.')) document.getElementById('top-rp')?.replaceWith(document.createRange().createContextualFragment(topPoints()));
   if (container) views[route].update?.(container, changed);
 });
 
@@ -71,8 +63,10 @@ window.addEventListener('hashchange', async () => {
   if (await handleShare()) return;
   const next = parseRoute();
   if (next === route && container) return;
+  const shellChanges = (next === 'welcome') !== (route === 'welcome');
   route = next;
-  renderView();
+  if (shellChanges) renderAll();
+  else renderView();
   window.scrollTo({ top: 0 });
   document.getElementById('main')?.focus({ preventScroll: true });
 });
@@ -95,11 +89,7 @@ document.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
   if (target.closest('[data-action="disclaimer"]')) { void openDisclaimer(); return; }
   const lang = target.closest<HTMLElement>('[data-set-lang]');
-  if (lang) { update((s) => { s.lang = lang.dataset.setLang as 'en' | 'es'; }, 'lang'); return; }
-  if (target.closest('[data-cycle-theme]')) {
-    const order: Theme[] = ['system', 'light', 'dark'];
-    update((s) => { s.theme = order[(order.indexOf(s.theme) + 1) % order.length]; }, 'theme');
-  }
+  if (lang) update((s) => { s.lang = lang.dataset.setLang as 'en' | 'es'; }, 'lang');
 });
 
 // ---------- shared scenario links ----------
@@ -126,6 +116,8 @@ async function handleShare(): Promise<boolean> {
 }
 
 // ---------- start ----------
+// First visit: set up the profile before anything else (shared links still open directly).
+if (!getState().onboarded && !location.hash.startsWith('#/share/')) history.replaceState(null, '', '#/welcome');
 route = parseRoute();
 renderAll();
 (async () => {

@@ -1,9 +1,10 @@
+import { PLAN_PRICES } from '../../config/plan.ts';
 import { calcMonth } from '../../engine/calc.ts';
 import { simulate } from '../../engine/simulate.ts';
 import type { SimAssumptions } from '../../engine/simulate.ts';
 import type { MonthInput } from '../../engine/types.ts';
 import { locale, money, t } from '../../i18n/index.ts';
-import { calcProfile, getState, resolvedPrices, shareLink, simOptions, uid, update } from '../../state/store.ts';
+import { calcProfile, getState, shareLink, simOptions, uid, update } from '../../state/store.ts';
 import { confirmSheet, esc, icon, toast } from '../dom.ts';
 import { textInput } from '../fields.ts';
 import { footnote } from '../components/disclaimer.ts';
@@ -12,7 +13,7 @@ import type { View } from './view.ts';
 
 function evaluate(month: MonthInput, sim: SimAssumptions) {
   const s = getState();
-  const prices = resolvedPrices(s);
+  const prices = PLAN_PRICES;
   const profile = calcProfile(s);
   const m = calcMonth(month, profile, prices);
   const run = simulate(sim, { ...profile, fastStartMonth: false }, prices, simOptions(s));

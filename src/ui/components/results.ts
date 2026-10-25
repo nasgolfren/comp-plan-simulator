@@ -1,11 +1,11 @@
-import { rankById } from '../../config/plan.ts';
+import { PLAN_PRICES, rankById } from '../../config/plan.ts';
 import type { RankId } from '../../config/plan.ts';
 import { INCOME_KEYS } from '../../engine/types.ts';
 import type { IncomeKey, MonthResult, Note } from '../../engine/types.ts';
 import { money, noteText, t } from '../../i18n/index.ts';
 import { calcMonth } from '../../engine/calc.ts';
 import { simulate } from '../../engine/simulate.ts';
-import { calcProfile, getState, resolvedPrices, simOptions } from '../../state/store.ts';
+import { calcProfile, getState, simOptions } from '../../state/store.ts';
 import { esc, icon } from '../dom.ts';
 
 export const seriesColor = (k: IncomeKey | 'net') => `var(--s-${k})`;
@@ -15,12 +15,12 @@ export const rankName = (id: RankId, short = false): string =>
 
 export function currentMonth(): MonthResult {
   const s = getState();
-  return calcMonth(s.month, calcProfile(s), resolvedPrices(s));
+  return calcMonth(s.month, calcProfile(s), PLAN_PRICES);
 }
 
 export function currentSim() {
   const s = getState();
-  return simulate(s.sim, { ...calcProfile(s), fastStartMonth: false }, resolvedPrices(s), simOptions(s));
+  return simulate(s.sim, { ...calcProfile(s), fastStartMonth: false }, PLAN_PRICES, simOptions(s));
 }
 
 export function noteHtml(n: Note): string {

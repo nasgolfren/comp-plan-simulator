@@ -1,9 +1,9 @@
-import { MEMBER_PLANS, RANKS, rankById } from '../../config/plan.ts';
+import { MEMBER_PLANS, PLAN_PRICES, RANKS, rankById } from '../../config/plan.ts';
 import { legActivationVolume, rankGap } from '../../engine/calc.ts';
 import { planGoal } from '../../engine/simulate.ts';
 import type { Goal } from '../../engine/simulate.ts';
 import { money, monthLabel, num, t } from '../../i18n/index.ts';
-import { calcProfile, getState, resolvedPrices, simOptions, update } from '../../state/store.ts';
+import { calcProfile, getState, simOptions, update } from '../../state/store.ts';
 import { esc, icon, toast } from '../dom.ts';
 import { numField, selectField } from '../fields.ts';
 import { footnote } from '../components/disclaimer.ts';
@@ -36,7 +36,7 @@ function requirements(): string {
   const s = getState();
   if (s.goal.kind !== 'rank') return '';
   const r = rankById(s.goal.rank);
-  const prices = resolvedPrices(s);
+  const prices = PLAN_PRICES;
   const month = currentMonth();
   const legs = s.month.legs.map((l) => ({ id: l.id, value: legActivationVolume(l, prices) + l.recurringVolume }));
   const gap = rankGap(r.id, month.production.directProduction, legs, month.production.tav);
@@ -63,7 +63,7 @@ function outlook(): string {
   const s = getState();
   const goal: Goal = s.goal.kind === 'rank' ? { kind: 'rank', rank: s.goal.rank } : { kind: 'income', net: s.goal.net };
   const opts = simOptions(s);
-  const res = planGoal(goal, s.sim, s.goal.deadline, { ...calcProfile(s), fastStartMonth: false }, resolvedPrices(s), opts);
+  const res = planGoal(goal, s.sim, s.goal.deadline, { ...calcProfile(s), fastStartMonth: false }, PLAN_PRICES, opts);
   const hasActivity = MEMBER_PLANS.some((p) => s.sim.personalActivations[p] > 0 || s.sim.partnerActivations[p] > 0) || s.sim.newPartnersPerMonth > 0;
   const n = s.goal.deadline;
 
