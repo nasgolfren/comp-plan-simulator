@@ -65,14 +65,14 @@ export function structureSvg(team: PartnerNode[], sums: Map<string, NodeSummary>
  * It opens fitted to the screen. Clicking a Partner card calls `onEdit`; the tree is
  * redrawn afterwards with `render`, keeping the current zoom and position.
  */
-export function openStructure(render: () => string, onEdit: (id: string) => Promise<void>): void {
+export function openStructure(render: () => string, onEdit: (id: string) => Promise<void>, title = t('team.structureTitle'), hint = t('team.structureHint')): void {
   const d = document.createElement('dialog');
   d.className = 'structure-dialog';
-  d.setAttribute('aria-label', t('team.structureTitle'));
+  d.setAttribute('aria-label', title);
   d.innerHTML = `
     <div class="structure-bar">
-      <h2>${esc(t('team.structureTitle'))}</h2>
-      <p class="hint hidden sm:block">${esc(t('team.structureHint'))}</p>
+      <h2>${esc(title)}</h2>
+      <p class="hint hidden sm:block">${esc(hint)}</p>
       <div class="ml-auto flex items-center gap-1.5">
         <button type="button" class="btn btn-sm icon-btn" data-zoom="out" aria-label="${esc(t('team.zoomOut'))}">${icon('minus', 16)}</button>
         <button type="button" class="btn btn-sm" data-zoom="fit">${esc(t('team.zoomFit'))}</button>

@@ -471,6 +471,17 @@ a.underline:hover { text-decoration-line: none; }
   .is-root .tree-rank { fill: var(--accent); }
   .tree-meta { font: 500 11.5px var(--font-sans); fill: var(--muted); }
 
+  /* Income breakdown tree */
+  .tree-amount { font: 800 21px var(--font-display); letter-spacing: 0.02em; fill: var(--ink); }
+  .tree-warn { font: 700 15px var(--font-sans); fill: var(--warn); cursor: help; }
+  .income-you rect { fill: var(--accent-soft); stroke: var(--accent); }
+  .income-you .tree-amount { fill: var(--accent); }
+  .income-own rect { fill: var(--brand-soft); stroke: var(--brand); }
+  .income-own .tree-amount { fill: var(--brand-ink); }
+  .income-leg .tree-amount { fill: var(--good); }
+  .income-partner rect { fill: var(--surface); stroke: var(--line); }
+  .income-partner .tree-amount { fill: var(--ink-2); font-size: 17px; }
+
   /* Collapsible panels */
   details.fold > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; list-style: none; cursor: pointer; }
   details.fold > summary::-webkit-details-marker { display: none; }

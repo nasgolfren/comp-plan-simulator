@@ -2,14 +2,16 @@ import { DAB, MEMBER_PLANS, PLAN_PRICES, rankById } from '../../config/plan.ts';
 import type { MemberPlan } from '../../config/plan.ts';
 import { inMonth, toIso } from '../../engine/activity.ts';
 import { activationVolume, recurringVolume } from '../../engine/calc.ts';
-import { allActivations, allPaying, findNode, flattenTeam, monthActivity, removeNode, summarizeTeam } from '../../engine/team.ts';
+import { allActivations, allPaying, findNode, flattenTeam, monthActivity, removeNode, summarizeTeam, toMonthInput } from '../../engine/team.ts';
 import type { ActivationKind, PartnerNode, PlanCounts } from '../../engine/types.ts';
 import { locale, money, t } from '../../i18n/index.ts';
-import { getPath, getState, newActivation, newPartner, setPath, update } from '../../state/store.ts';
+import { calcProfile, getPath, getState, newActivation, newPartner, setPath, update } from '../../state/store.ts';
 import { confirmSheet, esc, icon, openSheet } from '../dom.ts';
 import { footnote } from '../components/disclaimer.ts';
 import { costsAndNet, currentMonth, incomeLines, isMembershipFreeNote, membershipFreeBox, noteHtml, productionTable, rankName } from '../components/results.ts';
 import { openStructure, structureSvg } from '../components/structure.ts';
+import { incomeTreeSvg } from '../components/incomeTree.ts';
+import { incomeBreakdown } from '../../engine/breakdown.ts';
 import type { View } from './view.ts';
 
 // Partners collapsed in the table (memory only).
@@ -19,6 +21,13 @@ function structureNow(): string {
   const r = currentMonth();
   const team = getState().month.team;
   return structureSvg(team, summarizeTeam(team, PLAN_PRICES), { rank: r.qpRank === 'none' ? 'none' : r.paidRank, volume: r.production.tav + r.production.rqp });
+}
+
+/** The income tree for the full-screen view, from the current Structure. */
+function incomeNow(): string {
+  const s = getState();
+  const b = incomeBreakdown(toMonthInput(s.month, PLAN_PRICES), calcProfile(s), PLAN_PRICES);
+  return incomeTreeSvg(b, s.month.team, summarizeTeam(s.month.team, PLAN_PRICES));
 }
 
 const counts = (c: PlanCounts) => MEMBER_PLANS.map((p) => (c[p] ? `<span class="count ${p}">${c[p]}</span>` : '<span class="count zero">0</span>')).join('');
@@ -338,6 +347,7 @@ function resultsPanel(): string {
     <div class="mt-4">${membershipFreeBox(r)}</div>
     <div class="mt-3">${incomeLines(r)}</div>
     ${costsAndNet(r)}
+    <button type="button" class="btn btn-sm w-full mt-4" data-action="income-tree">${icon('tree', 15)}${esc(t('income.show'))}</button>
     <details class="mt-4">
       <summary class="cursor-pointer text-sm font-semibold text-brand-ink">${esc(t('calc.production'))}</summary>
       <div class="mt-2">${productionTable(r)}</div>
@@ -424,6 +434,11 @@ export const calculatorView: View = {
         if (await confirmSheet(t('team.remove'), msg, t('team.remove'), t('common.cancel'), true)) {
           update((s) => { removeNode(s.month.team, id); }, 'team');
         }
+      } else if (a === 'income-tree') {
+        openStructure(incomeNow, async (pid) => {
+          const n = findNode(getState().month.team, pid);
+          if (n) await partnerDialog({ edit: n });
+        }, t('income.treeTitle'), t('income.treeHint'));
       } else if (a === 'structure') {
         openStructure(structureNow, async (pid) => {
           const n = findNode(getState().month.team, pid);
